@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cherry Atlas KR</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <header class="topbar panel">
+    <div class="brand">
+      <strong>Cherry Atlas KR</strong>
+      <span>OSM + Overpass + Full-stack Starter</span>
+    </div>
+    <div class="top-actions">
+      <button id="refreshBtn">현재 화면 재조회</button>
+      <button id="fitKoreaBtn" class="secondary">대한민국 보기</button>
+    </div>
+  </header>
+
+  <aside id="leftPanel" class="left panel">
+    <div class="panel-header">
+      <strong>검색</strong>
+      <button id="toggleSearchPanelBtn" class="icon-btn" aria-label="검색 패널 접기">◀</button>
+    </div>
+    <div class="panel-content">
+      <label class="label" for="searchInput">검색어</label>
+      <input id="searchInput" type="text" placeholder="벚꽃, 여의도, 진해..." />
+
+      <label class="label" for="kindSelect">유형</label>
+      <select id="kindSelect">
+        <option value="all">전체</option>
+        <option value="tree">벚나무 포인트</option>
+        <option value="place">벚꽃 명소</option>
+        <option value="curated">추천 명소(보강)</option>
+        <option value="community">커뮤니티 스팟</option>
+      </select>
+
+      <p id="statusText" class="status">준비됨</p>
+      <div id="resultList" class="list"></div>
+    </div>
+  </aside>
+
+  <aside id="rightPanel" class="right panel">
+    <div class="panel-header">
+      <strong>계정/저장</strong>
+      <button id="toggleAccountPanelBtn" class="icon-btn" aria-label="로그인 패널 접기">▶</button>
+    </div>
+    <div class="panel-content">
+      <section class="box auth">
+        <div id="authGuest">
+          <h3>로그인</h3>
+          <input id="emailInput" type="email" placeholder="email" />
+          <input id="passwordInput" type="password" placeholder="password (6+)" />
+          <input id="nameInput" type="text" placeholder="name (회원가입 시 사용)" />
+          <div class="row">
+            <button id="loginBtn">로그인</button>
+            <button id="registerBtn" class="secondary">회원가입</button>
+          </div>
+        </div>
+        <div id="authUser" class="hidden">
+          <h3 id="userLabel">사용자</h3>
+          <button id="logoutBtn" class="secondary">로그아웃</button>
+        </div>
+      </section>
+
+      <section class="box save">
+        <h3>선택 지점 저장</h3>
+        <p id="selectedSpotText" class="small">지도에서 마커를 선택하세요.</p>
+        <textarea id="memoInput" rows="3" placeholder="메모"></textarea>
+        <button id="saveSpotBtn">내 스팟 저장</button>
+      </section>
+
+      <section class="box saved">
+        <h3>내 저장 스팟</h3>
+        <div id="savedSpotList" class="list"></div>
+      </section>
+    </div>
+  </aside>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/app.js"></script>
+</body>
+</html>

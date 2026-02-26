@@ -1,0 +1,14 @@
+{
+  "name": "cherry-blossom-map",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Korea cherry blossom map with OSM Overpass + full-stack starter",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js"
+  }
+}
