@@ -273,6 +273,21 @@ button.secondary:hover {
   font-size: 12px;
 }
 
+.toggle-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.toggle-line input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
 .hidden { display: none; }
 
 @media (max-width: 1100px) {

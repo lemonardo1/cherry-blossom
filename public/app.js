@@ -31,6 +31,7 @@ const els = {
   authGuest: document.getElementById("authGuest"),
   authUser: document.getElementById("authUser"),
   userLabel: document.getElementById("userLabel"),
+  enableMapPickToggle: document.getElementById("enableMapPickToggle"),
   selectedSpotText: document.getElementById("selectedSpotText"),
   memoInput: document.getElementById("memoInput"),
   saveSpotBtn: document.getElementById("saveSpotBtn"),
@@ -43,7 +44,13 @@ let filtered = [];
 let selectedFeature = null;
 let lastMeta = null;
 const markerLayer = L.layerGroup().addTo(map);
+const manualPickLayer = L.layerGroup().addTo(map);
 const markerMap = new Map();
+let manualPickMarker = null;
+
+function isManualPickEnabled() {
+  return Boolean(els.enableMapPickToggle && els.enableMapPickToggle.checked);
+}
 
 function setStatus(text) {
   els.statusText.textContent = text;
@@ -122,6 +129,26 @@ function filterFeatures() {
   renderFeatures();
 }
 
+function clearManualPickMarker() {
+  if (manualPickMarker) {
+    manualPickLayer.removeLayer(manualPickMarker);
+    manualPickMarker = null;
+  }
+}
+
+function setSelectedSpotHint() {
+  if (!els.selectedSpotText) return;
+  els.selectedSpotText.textContent = isManualPickEnabled()
+    ? "지도에서 마커를 선택하거나 지도를 클릭하세요."
+    : "지도에서 마커를 선택하세요.";
+}
+
+function selectFeature(feature, opts = {}) {
+  selectedFeature = feature;
+  const prefix = opts.manual ? "직접 선택" : feature.name;
+  els.selectedSpotText.textContent = `${prefix} (${feature.lat.toFixed(5)}, ${feature.lon.toFixed(5)})`;
+}
+
 function renderFeatures() {
   markerLayer.clearLayers();
   markerMap.clear();
@@ -133,7 +160,8 @@ function renderFeatures() {
       weight: 1,
       color: style.stroke,
       fillColor: style.fill,
-      fillOpacity: 0.78
+      fillOpacity: 0.78,
+      bubblingMouseEvents: false
     });
     const sourceLabel = sourceLabelByKind(f.kind);
     const extra = f.region ? `<br/>${f.region}` : "";
@@ -142,8 +170,8 @@ function renderFeatures() {
       `<strong>${f.name}</strong><br/>${sourceLabel}${extra}${memo}<br/>${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}`
     );
     marker.on("click", () => {
-      selectedFeature = f;
-      els.selectedSpotText.textContent = `${f.name} (${f.lat.toFixed(5)}, ${f.lon.toFixed(5)})`;
+      clearManualPickMarker();
+      selectFeature(f);
     });
     marker.addTo(markerLayer);
     markerMap.set(f.id, marker);
@@ -151,7 +179,7 @@ function renderFeatures() {
 
   renderList();
   const metaText = lastMeta
-    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}`
+    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}${lastMeta.overpassError ? " | OSM 장애(폴백)" : ""}`
     : "";
   setStatus(`조회 ${features.length.toLocaleString()}건 / 표시 ${filtered.length.toLocaleString()}건${metaText}`);
 }
@@ -171,8 +199,8 @@ function renderList() {
       map.setView([f.lat, f.lon], Math.max(map.getZoom(), 14), { animate: true });
       const marker = markerMap.get(f.id);
       if (marker) marker.openPopup();
-      selectedFeature = f;
-      els.selectedSpotText.textContent = `${f.name} (${f.lat.toFixed(5)}, ${f.lon.toFixed(5)})`;
+      clearManualPickMarker();
+      selectFeature(f);
     };
     els.resultList.appendChild(el);
   });
@@ -284,7 +312,13 @@ async function logout() {
 
 async function saveSpot() {
   if (!user) throw new Error("로그인이 필요합니다.");
-  if (!selectedFeature) throw new Error("먼저 지도 마커를 선택하세요.");
+  if (!selectedFeature) {
+    throw new Error(
+      isManualPickEnabled()
+        ? "먼저 마커를 선택하거나 지도를 클릭하세요."
+        : "먼저 지도 마커를 선택하세요."
+    );
+  }
   const memo = els.memoInput.value.trim();
   const res = await fetch("/api/spots", {
     method: "POST",
@@ -356,6 +390,19 @@ els.fitKoreaBtn.onclick = () => {
 
 els.searchInput.oninput = filterFeatures;
 els.kindSelect.onchange = filterFeatures;
+if (els.enableMapPickToggle) {
+  els.enableMapPickToggle.onchange = () => {
+    if (!isManualPickEnabled()) {
+      clearManualPickMarker();
+      if (selectedFeature?.source === "manual") {
+        selectedFeature = null;
+        setSelectedSpotHint();
+      }
+    } else if (!selectedFeature) {
+      setSelectedSpotHint();
+    }
+  };
+}
 
 els.loginBtn.onclick = async () => {
   try {
@@ -395,9 +442,36 @@ map.on("moveend", () => {
   }
 });
 
+map.on("click", (event) => {
+  if (!isManualPickEnabled()) return;
+  clearManualPickMarker();
+  manualPickMarker = L.circleMarker(event.latlng, {
+    radius: 8,
+    weight: 2,
+    color: "#175f3f",
+    fillColor: "#74cf9c",
+    fillOpacity: 0.92
+  }).addTo(manualPickLayer);
+  manualPickMarker.bindPopup("직접 선택한 위치").openPopup();
+  selectFeature(
+    {
+      id: `manual:${event.latlng.lat.toFixed(6)}:${event.latlng.lng.toFixed(6)}`,
+      name: "직접 선택 위치",
+      lat: event.latlng.lat,
+      lon: event.latlng.lng,
+      kind: "community",
+      source: "manual",
+      memo: "",
+      region: ""
+    },
+    { manual: true }
+  );
+});
+
 (async function boot() {
   try {
     initPanels();
+    setSelectedSpotHint();
     await authMe();
     if (user) await loadMySpots();
     else els.savedSpotList.innerHTML = '<div class="item">로그인 후 조회</div>';
