@@ -83,6 +83,7 @@ async function revalidateCacheEntry({
 async function loadCherryElements({
   bboxRaw,
   curatedFile,
+  listInternalCherrySpots,
   listApprovedReports,
   getOverpassCacheEntry,
   upsertOverpassCacheEntry,
@@ -151,6 +152,7 @@ async function loadCherryElements({
 
   const curated = await readJsonArray(curatedFile);
   const reports = asArray(await listApprovedReports());
+  const internalSpots = asArray(await listInternalCherrySpots({ status: "active" }));
   const curatedElements = curated
     .filter((p) => isInsideBbox(p, bbox))
     .map((p) => ({
@@ -168,10 +170,26 @@ async function loadCherryElements({
   const communityElements = reports
     .filter((p) => isInsideBbox(p, bbox))
     .map(asCommunityElement);
+  const internalElements = internalSpots
+    .filter((p) => isInsideBbox(p, bbox))
+    .map((p) => ({
+      type: "node",
+      id: `internal-${p.id}`,
+      lat: p.lat,
+      lon: p.lon,
+      tags: {
+        name: p.name,
+        source: "internal",
+        region: p.region || "",
+        memo: p.memo || "",
+        "cherry:type": "internal"
+      }
+    }));
 
   const merged = dedupeElements([
     ...(overpassData.elements || []),
     ...curatedElements,
+    ...internalElements,
     ...communityElements
   ]);
 
@@ -180,6 +198,7 @@ async function loadCherryElements({
     meta: {
       overpass: (overpassData.elements || []).length,
       curated: curatedElements.length,
+      internal: internalElements.length,
       community: communityElements.length,
       total: merged.length,
       cached: overpassData.cached,

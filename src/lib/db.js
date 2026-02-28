@@ -16,6 +16,7 @@ function mapUser(row) {
     id: row.id,
     email: row.email,
     name: row.name,
+    role: row.role || "user",
     passwordHash: row.password_hash,
     createdAt: toIso(row.created_at)
   };
@@ -72,15 +73,44 @@ function mapSnapshot(row) {
   };
 }
 
+function mapInternalCherrySpot(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    lat: Number(row.lat),
+    lon: Number(row.lon),
+    region: row.region || "",
+    memo: row.memo || "",
+    status: row.status || "active",
+    createdBy: row.created_by || null,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
 async function initSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
       password_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL
     )
+  `);
+  await pool.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'
+  `);
+  await pool.query(`
+    ALTER TABLE users
+    DROP CONSTRAINT IF EXISTS users_role_check
+  `);
+  await pool.query(`
+    ALTER TABLE users
+    ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin'))
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS spots (
@@ -125,11 +155,25 @@ async function initSchema() {
       meta JSONB NOT NULL DEFAULT '{}'::jsonb
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS internal_cherry_spots (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      lat DOUBLE PRECISION NOT NULL,
+      lon DOUBLE PRECISION NOT NULL,
+      region TEXT NOT NULL DEFAULT '',
+      memo TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      created_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )
+  `);
 }
 
 async function getUserById(id) {
   const { rows } = await pool.query(
-    "SELECT id, email, name, password_hash, created_at FROM users WHERE id = $1 LIMIT 1",
+    "SELECT id, email, name, role, password_hash, created_at FROM users WHERE id = $1 LIMIT 1",
     [id]
   );
   return mapUser(rows[0]);
@@ -137,7 +181,7 @@ async function getUserById(id) {
 
 async function getUserByEmail(email) {
   const { rows } = await pool.query(
-    "SELECT id, email, name, password_hash, created_at FROM users WHERE email = $1 LIMIT 1",
+    "SELECT id, email, name, role, password_hash, created_at FROM users WHERE email = $1 LIMIT 1",
     [email]
   );
   return mapUser(rows[0]);
@@ -145,11 +189,18 @@ async function getUserByEmail(email) {
 
 async function createUser(user) {
   await pool.query(
-    `INSERT INTO users (id, email, name, password_hash, created_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [user.id, user.email, user.name, user.passwordHash, user.createdAt]
+    `INSERT INTO users (id, email, name, role, password_hash, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [user.id, user.email, user.name, user.role || "user", user.passwordHash, user.createdAt]
   );
   return user;
+}
+
+async function hasAdminUser() {
+  const { rows } = await pool.query(
+    "SELECT 1 FROM users WHERE role = 'admin' LIMIT 1"
+  );
+  return rows.length > 0;
 }
 
 async function listSpots({ userId, mine }) {
@@ -308,6 +359,86 @@ async function upsertPlaceSnapshot(snapshot) {
   );
 }
 
+async function listInternalCherrySpots({ status = "active" } = {}) {
+  const values = [];
+  let whereSql = "";
+  if (status && status !== "all") {
+    values.push(status);
+    whereSql = `WHERE status = $${values.length}`;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, name, lat, lon, region, memo, status, created_by, created_at, updated_at
+     FROM internal_cherry_spots
+     ${whereSql}
+     ORDER BY updated_at DESC`,
+    values
+  );
+  return rows.map(mapInternalCherrySpot);
+}
+
+async function createInternalCherrySpot(spot) {
+  await pool.query(
+    `INSERT INTO internal_cherry_spots (
+      id, name, lat, lon, region, memo, status, created_by, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      spot.id,
+      spot.name,
+      spot.lat,
+      spot.lon,
+      spot.region || "",
+      spot.memo || "",
+      spot.status || "active",
+      spot.createdBy || null,
+      spot.createdAt,
+      spot.updatedAt
+    ]
+  );
+  return spot;
+}
+
+async function updateInternalCherrySpotById(spot) {
+  const { rows } = await pool.query(
+    `UPDATE internal_cherry_spots
+     SET name = $1,
+         lat = $2,
+         lon = $3,
+         region = $4,
+         memo = $5,
+         status = $6,
+         updated_at = $7
+     WHERE id = $8
+     RETURNING id, name, lat, lon, region, memo, status, created_by, created_at, updated_at`,
+    [
+      spot.name,
+      spot.lat,
+      spot.lon,
+      spot.region || "",
+      spot.memo || "",
+      spot.status || "active",
+      spot.updatedAt,
+      spot.id
+    ]
+  );
+  return mapInternalCherrySpot(rows[0]);
+}
+
+async function setInternalCherrySpotStatusById({ id, status, updatedAt }) {
+  const { rows } = await pool.query(
+    `UPDATE internal_cherry_spots
+     SET status = $1, updated_at = $2
+     WHERE id = $3
+     RETURNING id, name, lat, lon, region, memo, status, created_by, created_at, updated_at`,
+    [status, updatedAt, id]
+  );
+  return mapInternalCherrySpot(rows[0]);
+}
+
+async function clearGeoCache() {
+  await pool.query("DELETE FROM overpass_cache_entries");
+  await pool.query("DELETE FROM place_snapshots");
+}
+
 async function closeDb() {
   await pool.end();
 }
@@ -318,6 +449,7 @@ module.exports = {
   getUserById,
   getUserByEmail,
   createUser,
+  hasAdminUser,
   listSpots,
   createSpot,
   deleteSpotByIdForUser,
@@ -330,5 +462,10 @@ module.exports = {
   upsertOverpassCacheEntry,
   getPlaceSnapshot,
   upsertPlaceSnapshot,
+  listInternalCherrySpots,
+  createInternalCherrySpot,
+  updateInternalCherrySpotById,
+  setInternalCherrySpotStatusById,
+  clearGeoCache,
   closeDb
 };

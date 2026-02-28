@@ -40,7 +40,14 @@ const els = {
   selectedSpotText: document.getElementById("selectedSpotText"),
   memoInput: document.getElementById("memoInput"),
   saveSpotBtn: document.getElementById("saveSpotBtn"),
-  savedSpotList: document.getElementById("savedSpotList")
+  savedSpotList: document.getElementById("savedSpotList"),
+  adminSpotBox: document.getElementById("adminSpotBox"),
+  enableAdminPickToggle: document.getElementById("enableAdminPickToggle"),
+  adminSelectedSpotText: document.getElementById("adminSelectedSpotText"),
+  adminSpotNameInput: document.getElementById("adminSpotNameInput"),
+  adminSpotRegionInput: document.getElementById("adminSpotRegionInput"),
+  adminSpotMemoInput: document.getElementById("adminSpotMemoInput"),
+  saveAdminSpotBtn: document.getElementById("saveAdminSpotBtn")
 };
 
 let user = null;
@@ -54,9 +61,18 @@ const markerLayer = L.layerGroup().addTo(map);
 const manualPickLayer = L.layerGroup().addTo(map);
 const markerMap = new Map();
 let manualPickMarker = null;
+let adminSelectedPoint = null;
 
 function isManualPickEnabled() {
   return Boolean(els.enableMapPickToggle && els.enableMapPickToggle.checked);
+}
+
+function isAdminPickEnabled() {
+  return Boolean(els.enableAdminPickToggle && els.enableAdminPickToggle.checked);
+}
+
+function isAdminUser() {
+  return user?.role === "admin";
 }
 
 function setStatus(text) {
@@ -76,12 +92,22 @@ function setAuthUI() {
   if (user) {
     els.authGuest.classList.add("hidden");
     els.authUser.classList.remove("hidden");
-    els.userLabel.textContent = `${user.name} (${user.email})`;
+    const roleLabel = user.role === "admin" ? "관리자" : "일반";
+    els.userLabel.textContent = `${user.name} (${user.email}) · ${roleLabel}`;
   } else {
     els.authGuest.classList.remove("hidden");
     els.authUser.classList.add("hidden");
     els.userLabel.textContent = "사용자";
     setAuthGuestDepth(false);
+  }
+  if (els.adminSpotBox) {
+    const showAdmin = isAdminUser();
+    els.adminSpotBox.classList.toggle("hidden", !showAdmin);
+    if (!showAdmin) {
+      adminSelectedPoint = null;
+      if (els.enableAdminPickToggle) els.enableAdminPickToggle.checked = false;
+      setAdminSelectedSpotHint();
+    }
   }
   updateAccountFabBadge();
 }
@@ -135,6 +161,18 @@ function normalize(elements) {
           region: ""
         };
       }
+      if (source === "internal") {
+        return {
+          id: `${el.type}/${el.id}`,
+          name,
+          lat,
+          lon,
+          kind: "internal",
+          source,
+          memo: tags.memo || "",
+          region: tags.region || ""
+        };
+      }
       const isTree =
         tags.natural === "tree" &&
         /prunus|serrulata|cherry|벚/i.test(`${tags.genus || ""} ${tags.species || ""} ${name}`);
@@ -177,6 +215,17 @@ function setSelectedSpotHint() {
     : "지도에서 마커를 선택하세요.";
 }
 
+function setAdminSelectedSpotHint() {
+  if (!els.adminSelectedSpotText) return;
+  if (!isAdminUser()) {
+    els.adminSelectedSpotText.textContent = "관리자 계정으로 로그인하면 사용할 수 있습니다.";
+    return;
+  }
+  els.adminSelectedSpotText.textContent = isAdminPickEnabled()
+    ? "지도에서 등록할 좌표를 클릭하세요."
+    : "체크박스를 켜고 지도를 클릭해 좌표를 선택하세요.";
+}
+
 function selectFeature(feature, opts = {}) {
   selectedFeature = feature;
   const prefix = opts.manual ? "직접 선택" : feature.name;
@@ -213,7 +262,7 @@ function renderFeatures() {
 
   renderList();
   const metaText = lastMeta
-    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}${lastMeta.overpassError ? " | OSM 장애(폴백)" : ""}`
+    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 내부DB ${lastMeta.internal || 0} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}${lastMeta.overpassError ? " | OSM 장애(폴백)" : ""}`
     : "";
   setStatus(`조회 ${features.length.toLocaleString()}건 / 표시 ${filtered.length.toLocaleString()}건${metaText}`);
 }
@@ -255,6 +304,7 @@ async function fetchCherry() {
 function markerStyleByKind(kind) {
   if (kind === "tree") return { radius: 5.5, stroke: "#b03a76", fill: "#ff8fc4" };
   if (kind === "curated") return { radius: 7.5, stroke: "#962d66", fill: "#ff6fb2" };
+  if (kind === "internal") return { radius: 8, stroke: "#2f6a47", fill: "#6dcf98" };
   if (kind === "community") return { radius: 7, stroke: "#a83871", fill: "#ff7fbb" };
   return { radius: 7, stroke: "#ad3d75", fill: "#ff9bc9" };
 }
@@ -262,6 +312,7 @@ function markerStyleByKind(kind) {
 function shortLabelByKind(kind) {
   if (kind === "tree") return "벚나무";
   if (kind === "curated") return "추천";
+  if (kind === "internal") return "내부DB";
   if (kind === "community") return "커뮤니티";
   return "명소";
 }
@@ -269,6 +320,7 @@ function shortLabelByKind(kind) {
 function sourceLabelByKind(kind) {
   if (kind === "tree") return "벚나무 포인트 (OSM)";
   if (kind === "curated") return "추천 명소(보강)";
+  if (kind === "internal") return "내부 데이터베이스";
   if (kind === "community") return "커뮤니티 스팟";
   return "벚꽃 명소 (OSM)";
 }
@@ -416,6 +468,36 @@ async function saveSpot() {
   await loadMySpots();
 }
 
+async function saveAdminSpot() {
+  if (!isAdminUser()) throw new Error("관리자 권한이 필요합니다.");
+  if (!adminSelectedPoint) throw new Error("먼저 관리자 등록 좌표를 지도에서 클릭하세요.");
+
+  const name = els.adminSpotNameInput.value.trim();
+  if (!name) throw new Error("스팟 이름을 입력하세요.");
+
+  const res = await fetch("/api/admin/cherry-spots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      lat: adminSelectedPoint.lat,
+      lon: adminSelectedPoint.lon,
+      region: els.adminSpotRegionInput.value.trim(),
+      memo: els.adminSpotMemoInput.value.trim()
+    })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "관리자 등록 실패");
+
+  els.adminSpotNameInput.value = "";
+  els.adminSpotRegionInput.value = "";
+  els.adminSpotMemoInput.value = "";
+  adminSelectedPoint = null;
+  clearManualPickMarker();
+  setAdminSelectedSpotHint();
+  await fetchCherry();
+}
+
 async function removeSpot(id) {
   const res = await fetch(`/api/spots/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("삭제 실패");
@@ -474,6 +556,16 @@ if (els.enableMapPickToggle) {
   };
 }
 
+if (els.enableAdminPickToggle) {
+  els.enableAdminPickToggle.onchange = () => {
+    if (!isAdminPickEnabled()) {
+      adminSelectedPoint = null;
+      clearManualPickMarker();
+    }
+    setAdminSelectedSpotHint();
+  };
+}
+
 els.loginBtn.onclick = async () => {
   try {
     await login();
@@ -518,6 +610,16 @@ els.saveSpotBtn.onclick = async () => {
   }
 };
 
+if (els.saveAdminSpotBtn) {
+  els.saveAdminSpotBtn.onclick = async () => {
+    try {
+      await saveAdminSpot();
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+}
+
 map.on("moveend", () => {
   if (map.getZoom() >= 8) {
     fetchCherry().catch((err) => setStatus(`오류: ${err.message}`));
@@ -525,7 +627,9 @@ map.on("moveend", () => {
 });
 
 map.on("click", (event) => {
-  if (!isManualPickEnabled()) return;
+  const allowManual = isManualPickEnabled();
+  const allowAdmin = isAdminUser() && isAdminPickEnabled();
+  if (!allowManual && !allowAdmin) return;
   clearManualPickMarker();
   manualPickMarker = L.circleMarker(event.latlng, {
     radius: 8,
@@ -534,26 +638,36 @@ map.on("click", (event) => {
     fillColor: "#74cf9c",
     fillOpacity: 0.92
   }).addTo(manualPickLayer);
-  manualPickMarker.bindPopup("직접 선택한 위치").openPopup();
-  selectFeature(
-    {
-      id: `manual:${event.latlng.lat.toFixed(6)}:${event.latlng.lng.toFixed(6)}`,
-      name: "직접 선택 위치",
+  manualPickMarker.bindPopup(allowAdmin ? "관리자 등록 좌표" : "직접 선택한 위치").openPopup();
+  if (allowManual) {
+    selectFeature(
+      {
+        id: `manual:${event.latlng.lat.toFixed(6)}:${event.latlng.lng.toFixed(6)}`,
+        name: "직접 선택 위치",
+        lat: event.latlng.lat,
+        lon: event.latlng.lng,
+        kind: "community",
+        source: "manual",
+        memo: "",
+        region: ""
+      },
+      { manual: true }
+    );
+  }
+  if (allowAdmin) {
+    adminSelectedPoint = {
       lat: event.latlng.lat,
-      lon: event.latlng.lng,
-      kind: "community",
-      source: "manual",
-      memo: "",
-      region: ""
-    },
-    { manual: true }
-  );
+      lon: event.latlng.lng
+    };
+    els.adminSelectedSpotText.textContent = `선택됨 (${event.latlng.lat.toFixed(5)}, ${event.latlng.lng.toFixed(5)})`;
+  }
 });
 
 (async function boot() {
   try {
     initPanels();
     setSelectedSpotHint();
+    setAdminSelectedSpotHint();
     updateAccountFabBadge();
     await authMe();
     if (user) await loadMySpots();

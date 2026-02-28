@@ -2,6 +2,7 @@ const { parseCookies } = require("../../lib/http");
 const { createAuthHandler } = require("./auth");
 const { createSpotsHandler } = require("./spots");
 const { createReportsHandler } = require("./reports");
+const { createAdminCherrySpotsHandler } = require("./admin-cherry-spots");
 const { createOsmHandler } = require("./osm");
 const { handleHealth } = require("./health");
 
@@ -63,9 +64,17 @@ function createApiHandler({
 
   const handlers = [
     handleHealth,
-    createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser }),
+    createAuthHandler({
+      usersFile,
+      readJson,
+      writeJson,
+      sessions,
+      authUser,
+      hasAdminUser: db.hasAdminUser
+    }),
     createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authUser }),
     createReportsHandler({ reportsFile, readJson, writeJson, authUser }),
+    createAdminCherrySpotsHandler({ authUser, db }),
     createOsmHandler({
       curatedFile,
       db,

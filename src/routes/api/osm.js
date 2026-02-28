@@ -12,6 +12,7 @@ function createOsmHandler({
       const result = await loadCherryElements({
         bboxRaw: url.searchParams.get("bbox"),
         curatedFile,
+        listInternalCherrySpots: db.listInternalCherrySpots,
         listApprovedReports: db.listApprovedReports,
         getOverpassCacheEntry: db.getOverpassCacheEntry,
         upsertOverpassCacheEntry: db.upsertOverpassCacheEntry,

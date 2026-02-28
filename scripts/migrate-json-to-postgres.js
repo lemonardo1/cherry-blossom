@@ -18,15 +18,23 @@ async function readJsonOrDefault(filePath, fallback) {
 async function importUsers(users) {
   for (const user of users) {
     await db.pool.query(
-      `INSERT INTO users (id, email, name, password_hash, created_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (id, email, name, role, password_hash, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (id)
        DO UPDATE SET
          email = EXCLUDED.email,
          name = EXCLUDED.name,
+         role = EXCLUDED.role,
          password_hash = EXCLUDED.password_hash,
          created_at = EXCLUDED.created_at`,
-      [user.id, user.email, user.name, user.passwordHash, user.createdAt || new Date().toISOString()]
+      [
+        user.id,
+        user.email,
+        user.name,
+        user.role || "user",
+        user.passwordHash,
+        user.createdAt || new Date().toISOString()
+      ]
     );
   }
   console.log(`[ok] users ${users.length}건 upsert`);
@@ -134,6 +142,42 @@ async function importPlaceSnapshots(store) {
   console.log(`[ok] place snapshots ${keys.length}건 upsert`);
 }
 
+async function importInternalCherrySpots(spots) {
+  for (const spot of spots) {
+    const now = new Date().toISOString();
+    await db.pool.query(
+      `INSERT INTO internal_cherry_spots (
+        id, name, lat, lon, region, memo, status, created_by, created_at, updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (id)
+       DO UPDATE SET
+         name = EXCLUDED.name,
+         lat = EXCLUDED.lat,
+         lon = EXCLUDED.lon,
+         region = EXCLUDED.region,
+         memo = EXCLUDED.memo,
+         status = EXCLUDED.status,
+         created_by = EXCLUDED.created_by,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        spot.id,
+        spot.name,
+        spot.lat,
+        spot.lon,
+        spot.region || "",
+        spot.memo || "",
+        spot.status || "active",
+        spot.createdBy || null,
+        spot.createdAt || now,
+        spot.updatedAt || spot.createdAt || now
+      ]
+    );
+  }
+  console.log(`[ok] internal cherry spots ${spots.length}건 upsert`);
+}
+
 async function main() {
   await db.initSchema();
 
@@ -142,12 +186,14 @@ async function main() {
   const reports = await readJsonOrDefault(path.join(DATA_DIR, "reports.json"), []);
   const overpassCache = await readJsonOrDefault(path.join(DATA_DIR, "overpass-cache.json"), { entries: [] });
   const places = await readJsonOrDefault(path.join(DATA_DIR, "places.json"), { snapshots: {} });
+  const internalSpots = await readJsonOrDefault(path.join(DATA_DIR, "internal-cherry-spots.json"), []);
 
   await importUsers(Array.isArray(users) ? users : []);
   await importSpots(Array.isArray(spots) ? spots : []);
   await importReports(Array.isArray(reports) ? reports : []);
   await importOverpassEntries(overpassCache);
   await importPlaceSnapshots(places);
+  await importInternalCherrySpots(Array.isArray(internalSpots) ? internalSpots : []);
 }
 
 main()

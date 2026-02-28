@@ -8,7 +8,7 @@ const {
   clearSessionCookie
 } = require("../../lib/auth");
 
-function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser }) {
+function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser, hasAdminUser }) {
   return async function handleAuth(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
       let body;
@@ -34,6 +34,7 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser 
         id: makeId(),
         email,
         name,
+        role: (await hasAdminUser()) ? "user" : "admin",
         passwordHash: hashPassword(password),
         createdAt: new Date().toISOString()
       };

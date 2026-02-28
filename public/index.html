@@ -50,6 +50,7 @@
         <option value="tree">벚나무 포인트</option>
         <option value="place">벚꽃 명소</option>
         <option value="curated">추천 명소(보강)</option>
+        <option value="internal">내부 DB 스팟</option>
         <option value="community">커뮤니티 스팟</option>
       </select>
 
@@ -94,6 +95,19 @@
         <p id="selectedSpotText" class="small">지도에서 마커를 선택하세요.</p>
         <textarea id="memoInput" rows="3" placeholder="메모"></textarea>
         <button id="saveSpotBtn">내 스팟 저장</button>
+      </section>
+
+      <section id="adminSpotBox" class="box save hidden">
+        <h3>관리자 벚꽃 등록</h3>
+        <label class="toggle-line">
+          <input id="enableAdminPickToggle" type="checkbox" />
+          <span>지도 클릭으로 관리자 좌표 선택</span>
+        </label>
+        <p id="adminSelectedSpotText" class="small">관리자 모드에서 지도 클릭으로 좌표를 고르세요.</p>
+        <input id="adminSpotNameInput" type="text" placeholder="스팟 이름" />
+        <input id="adminSpotRegionInput" type="text" placeholder="지역 (예: 서울 영등포)" />
+        <textarea id="adminSpotMemoInput" rows="3" placeholder="메모"></textarea>
+        <button id="saveAdminSpotBtn">내부 DB에 등록</button>
       </section>
 
       <section class="box saved">

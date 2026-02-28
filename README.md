@@ -51,7 +51,7 @@ gcloud run deploy cherry-blossom-map \
 - Frontend: Vanilla JS + Leaflet (`/public`)
 - Backend: Node.js built-in HTTP server (entry: `/server.js`, modules: `/src`)
 - Storage: PostgreSQL + JSON seed files
-  - DB 테이블: `users`, `spots`, `reports`, `overpass_cache_entries`, `place_snapshots`
+  - DB 테이블: `users`, `spots`, `reports`, `internal_cherry_spots`, `overpass_cache_entries`, `place_snapshots`
   - 파일 입력(마이그레이션용): `/data/*.json`
   - 추천 데이터: `/data/cherry-curated.json`
 
@@ -72,9 +72,9 @@ gcloud run deploy cherry-blossom-map \
 ## Services
 
 - `src/services/cherry.js`
-  - 역할: OSM + 추천(`cherry-curated.json`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
+  - 역할: OSM + 추천(`cherry-curated.json`) + 내부DB(`internal_cherry_spots`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
   - 입력: `bboxRaw`, DB 접근 함수, 파일 경로, Overpass 엔드포인트 목록
-  - 출력: `{ elements, meta }` (`overpass/curated/community/total/cached/overpassError`)
+  - 출력: `{ elements, meta }` (`overpass/curated/internal/community/total/cached/overpassError`)
   - 부가 동작: 조회 결과를 DB `place_snapshots`에 bbox 키별 스냅샷 저장
 - `src/services/overpass.js`
   - 역할: Overpass 쿼리 생성, bbox 파싱, 중복 제거, 원격 조회
@@ -123,6 +123,15 @@ npm run dev
 - `GET /api/reports?mine=1`
 - `POST /api/reports`
 - `PATCH /api/reports/:id` (`status`: `pending|approved|rejected`)
+- `GET /api/admin/cherry-spots?status=active|inactive|all` (admin)
+- `POST /api/admin/cherry-spots` (admin)
+- `PATCH /api/admin/cherry-spots/:id` (admin)
+- `DELETE /api/admin/cherry-spots/:id` (admin, soft delete)
+
+## Admin Bootstrap
+
+- 최초 가입 사용자 1명은 자동으로 `admin` role이 됩니다.
+- 이후 가입 사용자는 기본 `user` role로 생성됩니다.
 
 ## Next Upgrade
 
