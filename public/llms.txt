@@ -1,0 +1,29 @@
+# Cherry Atlas KR
+
+대한민국 벚꽃 명소/벚나무 포인트 지도 서비스.
+사용자는 지도에서 위치를 검색하고 개인 스팟을 저장할 수 있습니다.
+
+## Public Endpoints
+
+- GET /api/health
+- GET /api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat
+- GET /api/reports
+
+## Auth Required Endpoints
+
+- GET /api/auth/me
+- POST /api/auth/register
+- POST /api/auth/login
+- POST /api/auth/logout
+- GET /api/spots?mine=1
+- POST /api/spots
+- DELETE /api/spots/:id
+- GET /api/reports?mine=1
+- POST /api/reports
+- PATCH /api/reports/:id
+
+## Discovery
+
+- /api-discovery.json
+- /robots.txt
+- /sitemap.xml

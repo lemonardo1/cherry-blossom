@@ -12,12 +12,14 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 }).addTo(map);
 
 const els = {
-  refreshBtn: document.getElementById("refreshBtn"),
-  fitKoreaBtn: document.getElementById("fitKoreaBtn"),
   leftPanel: document.getElementById("leftPanel"),
   rightPanel: document.getElementById("rightPanel"),
   toggleSearchPanelBtn: document.getElementById("toggleSearchPanelBtn"),
-  toggleAccountPanelBtn: document.getElementById("toggleAccountPanelBtn"),
+  closeAccountPanelBtn: document.getElementById("closeAccountPanelBtn"),
+  accountFabBtn: document.getElementById("accountFabBtn"),
+  accountFabBadge: document.getElementById("accountFabBadge"),
+  fabAutoToggle: document.getElementById("fabAutoToggle"),
+  fabCompactToggle: document.getElementById("fabCompactToggle"),
   searchInput: document.getElementById("searchInput"),
   kindSelect: document.getElementById("kindSelect"),
   statusText: document.getElementById("statusText"),
@@ -27,6 +29,9 @@ const els = {
   nameInput: document.getElementById("nameInput"),
   loginBtn: document.getElementById("loginBtn"),
   registerBtn: document.getElementById("registerBtn"),
+  registerRow: document.getElementById("registerRow"),
+  registerSubmitBtn: document.getElementById("registerSubmitBtn"),
+  registerBackBtn: document.getElementById("registerBackBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   authGuest: document.getElementById("authGuest"),
   authUser: document.getElementById("authUser"),
@@ -43,6 +48,8 @@ let features = [];
 let filtered = [];
 let selectedFeature = null;
 let lastMeta = null;
+let mySpotCount = 0;
+let fabAutoMode = true;
 const markerLayer = L.layerGroup().addTo(map);
 const manualPickLayer = L.layerGroup().addTo(map);
 const markerMap = new Map();
@@ -56,6 +63,15 @@ function setStatus(text) {
   els.statusText.textContent = text;
 }
 
+function setAuthGuestDepth(registerDepth) {
+  if (!els.authGuest) return;
+  els.nameInput.classList.toggle("hidden", !registerDepth);
+  els.loginBtn.classList.toggle("hidden", registerDepth);
+  els.registerBtn.classList.toggle("hidden", registerDepth);
+  if (els.registerRow) els.registerRow.classList.toggle("hidden", !registerDepth);
+  if (!registerDepth) els.nameInput.value = "";
+}
+
 function setAuthUI() {
   if (user) {
     els.authGuest.classList.add("hidden");
@@ -65,7 +81,25 @@ function setAuthUI() {
     els.authGuest.classList.remove("hidden");
     els.authUser.classList.add("hidden");
     els.userLabel.textContent = "사용자";
+    setAuthGuestDepth(false);
   }
+  updateAccountFabBadge();
+}
+
+function updateAccountFabBadge() {
+  if (!els.accountFabBadge) return;
+  if (!user) {
+    els.accountFabBadge.classList.remove("hidden");
+    els.accountFabBadge.textContent = "!";
+    return;
+  }
+  if (mySpotCount > 0) {
+    els.accountFabBadge.classList.remove("hidden");
+    els.accountFabBadge.textContent = mySpotCount > 99 ? "99+" : String(mySpotCount);
+    return;
+  }
+  els.accountFabBadge.classList.add("hidden");
+  els.accountFabBadge.textContent = "";
 }
 
 function normalize(elements) {
@@ -219,10 +253,10 @@ async function fetchCherry() {
 }
 
 function markerStyleByKind(kind) {
-  if (kind === "tree") return { radius: 5.5, stroke: "#397c32", fill: "#7fcf5f" };
-  if (kind === "curated") return { radius: 7.5, stroke: "#2b6f28", fill: "#5ab046" };
-  if (kind === "community") return { radius: 7, stroke: "#2e7b54", fill: "#6acb8f" };
-  return { radius: 7, stroke: "#4f8338", fill: "#9ed36b" };
+  if (kind === "tree") return { radius: 5.5, stroke: "#b03a76", fill: "#ff8fc4" };
+  if (kind === "curated") return { radius: 7.5, stroke: "#962d66", fill: "#ff6fb2" };
+  if (kind === "community") return { radius: 7, stroke: "#a83871", fill: "#ff7fbb" };
+  return { radius: 7, stroke: "#ad3d75", fill: "#ff9bc9" };
 }
 
 function shortLabelByKind(kind) {
@@ -239,30 +273,75 @@ function sourceLabelByKind(kind) {
   return "벚꽃 명소 (OSM)";
 }
 
-function applyPanelState(side, collapsed) {
-  const isLeft = side === "left";
-  const panel = isLeft ? els.leftPanel : els.rightPanel;
-  const btn = isLeft ? els.toggleSearchPanelBtn : els.toggleAccountPanelBtn;
-  panel.classList.toggle("collapsed", collapsed);
-  btn.textContent = isLeft ? (collapsed ? "▶" : "◀") : (collapsed ? "◀" : "▶");
-  btn.setAttribute("aria-label", isLeft ? (collapsed ? "검색 패널 열기" : "검색 패널 접기") : (collapsed ? "로그인 패널 열기" : "로그인 패널 접기"));
-  localStorage.setItem(isLeft ? "panel:left" : "panel:right", collapsed ? "1" : "0");
+function applyLeftPanelState(collapsed) {
+  els.leftPanel.classList.toggle("collapsed", collapsed);
+  els.toggleSearchPanelBtn.textContent = collapsed ? "▶" : "◀";
+  els.toggleSearchPanelBtn.setAttribute("aria-label", collapsed ? "검색 패널 열기" : "검색 패널 접기");
+  localStorage.setItem("panel:left", collapsed ? "1" : "0");
+}
+
+function setAccountPanelOpen(open) {
+  els.rightPanel.classList.toggle("open", open);
+  if (els.accountFabBtn) {
+    els.accountFabBtn.classList.toggle("hidden", open);
+    els.accountFabBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  localStorage.setItem("panel:right:open", open ? "1" : "0");
+}
+
+function setFabCompactMode(compact) {
+  if (els.accountFabBtn) els.accountFabBtn.classList.toggle("compact", compact);
+}
+
+function applyFabMode() {
+  const compact = fabAutoMode
+    ? window.matchMedia("(max-width: 900px)").matches
+    : localStorage.getItem("fab:compact") === "1";
+  setFabCompactMode(compact);
+  if (els.fabCompactToggle) els.fabCompactToggle.checked = compact;
+  const compactLabel = els.fabCompactToggle?.closest(".toggle-line");
+  if (compactLabel) compactLabel.classList.toggle("compact-disabled", fabAutoMode);
+}
+
+function setFabAutoMode(auto) {
+  fabAutoMode = auto;
+  if (els.fabAutoToggle) els.fabAutoToggle.checked = auto;
+  localStorage.setItem("fab:auto", auto ? "1" : "0");
+  applyFabMode();
 }
 
 function initPanels() {
   const leftCollapsed = localStorage.getItem("panel:left") === "1";
-  const rightCollapsed = localStorage.getItem("panel:right") === "1";
-  applyPanelState("left", leftCollapsed);
-  applyPanelState("right", rightCollapsed);
+  const rightOpen = localStorage.getItem("panel:right:open") === "1";
+  const savedAuto = localStorage.getItem("fab:auto");
+  fabAutoMode = savedAuto == null ? true : savedAuto === "1";
+  applyLeftPanelState(leftCollapsed);
+  setAccountPanelOpen(rightOpen);
+  if (els.fabAutoToggle) els.fabAutoToggle.checked = fabAutoMode;
+  applyFabMode();
 
   els.toggleSearchPanelBtn.onclick = () => {
     const next = !els.leftPanel.classList.contains("collapsed");
-    applyPanelState("left", next);
+    applyLeftPanelState(next);
   };
-  els.toggleAccountPanelBtn.onclick = () => {
-    const next = !els.rightPanel.classList.contains("collapsed");
-    applyPanelState("right", next);
-  };
+  if (els.accountFabBtn) els.accountFabBtn.onclick = () => setAccountPanelOpen(true);
+  if (els.closeAccountPanelBtn) els.closeAccountPanelBtn.onclick = () => setAccountPanelOpen(false);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setAccountPanelOpen(false);
+  });
+  if (els.fabCompactToggle) {
+    els.fabCompactToggle.onchange = () => {
+      if (fabAutoMode) return;
+      localStorage.setItem("fab:compact", els.fabCompactToggle.checked ? "1" : "0");
+      applyFabMode();
+    };
+  }
+  if (els.fabAutoToggle) {
+    els.fabAutoToggle.onchange = () => setFabAutoMode(Boolean(els.fabAutoToggle.checked));
+  }
+  window.addEventListener("resize", () => {
+    if (fabAutoMode) applyFabMode();
+  });
 }
 
 async function authMe() {
@@ -306,6 +385,7 @@ async function register() {
 async function logout() {
   await fetch("/api/auth/logout", { method: "POST" });
   user = null;
+  mySpotCount = 0;
   setAuthUI();
   els.savedSpotList.innerHTML = '<div class="item">로그인 후 조회</div>';
 }
@@ -347,6 +427,8 @@ async function loadMySpots() {
   const res = await fetch("/api/spots?mine=1");
   const json = await res.json();
   const list = json.spots || [];
+  mySpotCount = list.length;
+  updateAccountFabBadge();
   els.savedSpotList.innerHTML = "";
   if (!list.length) {
     els.savedSpotList.innerHTML = '<div class="item">저장된 스팟 없음</div>';
@@ -376,18 +458,6 @@ async function loadMySpots() {
   });
 }
 
-els.refreshBtn.onclick = async () => {
-  try {
-    await fetchCherry();
-  } catch (error) {
-    setStatus(`오류: ${error.message}`);
-  }
-};
-
-els.fitKoreaBtn.onclick = () => {
-  map.setView([36.35, 127.8], 7, { animate: true });
-};
-
 els.searchInput.oninput = filterFeatures;
 els.kindSelect.onchange = filterFeatures;
 if (els.enableMapPickToggle) {
@@ -412,13 +482,25 @@ els.loginBtn.onclick = async () => {
   }
 };
 
-els.registerBtn.onclick = async () => {
-  try {
-    await register();
-  } catch (error) {
-    alert(error.message);
-  }
+els.registerBtn.onclick = () => {
+  setAuthGuestDepth(true);
 };
+
+if (els.registerBackBtn) {
+  els.registerBackBtn.onclick = () => {
+    setAuthGuestDepth(false);
+  };
+}
+
+if (els.registerSubmitBtn) {
+  els.registerSubmitBtn.onclick = async () => {
+    try {
+      await register();
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+}
 
 els.logoutBtn.onclick = async () => {
   try {
@@ -472,6 +554,7 @@ map.on("click", (event) => {
   try {
     initPanels();
     setSelectedSpotHint();
+    updateAccountFabBadge();
     await authMe();
     if (user) await loadMySpots();
     else els.savedSpotList.innerHTML = '<div class="item">로그인 후 조회</div>';

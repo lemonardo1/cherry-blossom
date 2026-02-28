@@ -3,11 +3,7 @@ const { loadCherryElements } = require("../../services/cherry");
 
 function createOsmHandler({
   curatedFile,
-  reportsFile,
-  overpassCacheFile,
-  placesFile,
-  readJson,
-  writeJson,
+  db,
   overpassEndpoints
 }) {
   return async function handleOsm(req, res, url) {
@@ -15,12 +11,12 @@ function createOsmHandler({
     try {
       const result = await loadCherryElements({
         bboxRaw: url.searchParams.get("bbox"),
-        readJson,
-        writeJson,
         curatedFile,
-        reportsFile,
-        overpassCacheFile,
-        placesFile,
+        listApprovedReports: db.listApprovedReports,
+        getOverpassCacheEntry: db.getOverpassCacheEntry,
+        upsertOverpassCacheEntry: db.upsertOverpassCacheEntry,
+        getPlaceSnapshot: db.getPlaceSnapshot,
+        upsertPlaceSnapshot: db.upsertPlaceSnapshot,
         overpassEndpoints
       });
       return sendJson(res, 200, result);

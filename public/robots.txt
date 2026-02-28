@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Public discovery documents
+Sitemap: /sitemap.xml

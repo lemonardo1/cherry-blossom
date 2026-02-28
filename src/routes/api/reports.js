@@ -7,15 +7,10 @@ function createReportsHandler({ reportsFile, readJson, writeJson, authUser }) {
       const user = await authUser(req);
       const mine = url.searchParams.get("mine") === "1";
       const status = String(url.searchParams.get("status") || "").trim();
-      const reports = await readJson(reportsFile);
-      let data = reports;
       if (mine) {
         if (!user) return sendJson(res, 401, { error: "auth_required" });
-        data = reports.filter((r) => r.userId === user.id);
-      } else {
-        data = reports.filter((r) => r.status === "approved");
       }
-      if (status) data = data.filter((r) => r.status === status);
+      const data = await readJson(reportsFile, { mine, userId: user?.id || null, status });
       return sendJson(res, 200, { reports: data });
     }
 
@@ -50,9 +45,7 @@ function createReportsHandler({ reportsFile, readJson, writeJson, authUser }) {
         createdAt: now,
         updatedAt: now
       };
-      const reports = await readJson(reportsFile);
-      reports.push(report);
-      await writeJson(reportsFile, reports);
+      await writeJson(reportsFile, report);
       return sendJson(res, 201, { report });
     }
 
@@ -72,13 +65,15 @@ function createReportsHandler({ reportsFile, readJson, writeJson, authUser }) {
         return sendJson(res, 400, { error: "invalid_status" });
       }
 
-      const reports = await readJson(reportsFile);
-      const idx = reports.findIndex((r) => r.id === id);
-      if (idx < 0) return sendJson(res, 404, { error: "not_found" });
-      if (reports[idx].userId !== user.id) return sendJson(res, 403, { error: "forbidden" });
-      reports[idx] = { ...reports[idx], status: nextStatus, updatedAt: new Date().toISOString() };
-      await writeJson(reportsFile, reports);
-      return sendJson(res, 200, { report: reports[idx] });
+      const report = await writeJson(reportsFile, {
+        op: "updateStatusByUser",
+        id,
+        userId: user.id,
+        status: nextStatus,
+        updatedAt: new Date().toISOString()
+      });
+      if (!report) return sendJson(res, 404, { error: "not_found" });
+      return sendJson(res, 200, { report });
     }
 
     return false;

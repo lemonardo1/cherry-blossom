@@ -3,23 +3,37 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cherry Atlas KR</title>
+  <title>벚꽃 지도 | 체리 아틀라스 KR</title>
+  <meta name="description" content="대한민국 벚꽃 명소와 벚나무 포인트를 지도에서 검색하고 저장하는 서비스입니다." />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="벚꽃 지도 | 체리 아틀라스 KR" />
+  <meta property="og:description" content="대한민국 벚꽃 명소, 커뮤니티 제보, 추천 스팟을 한 번에 조회합니다." />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="벚꽃 지도 | 체리 아틀라스 KR" />
+  <meta name="twitter:description" content="대한민국 벚꽃 명소와 벚나무 포인트 지도" />
+  <link rel="alternate" type="application/xml" href="/sitemap.xml" />
+  <link rel="alternate" type="text/plain" href="/llms.txt" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <link rel="stylesheet" href="/styles.css" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "체리 아틀라스 KR",
+      "url": "/",
+      "inLanguage": "ko-KR",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "/?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
 </head>
 <body>
   <div id="map"></div>
-
-  <header class="topbar panel">
-    <div class="brand">
-      <strong>Cherry Atlas KR</strong>
-      <span>OSM + Overpass + Full-stack Starter</span>
-    </div>
-    <div class="top-actions">
-      <button id="refreshBtn">현재 화면 재조회</button>
-      <button id="fitKoreaBtn" class="secondary">대한민국 보기</button>
-    </div>
-  </header>
 
   <aside id="leftPanel" class="left panel">
     <div class="panel-header">
@@ -47,7 +61,7 @@
   <aside id="rightPanel" class="right panel">
     <div class="panel-header">
       <strong>계정/저장</strong>
-      <button id="toggleAccountPanelBtn" class="icon-btn" aria-label="로그인 패널 접기">▶</button>
+      <button id="closeAccountPanelBtn" class="icon-btn" aria-label="계정/저장 패널 닫기">✕</button>
     </div>
     <div class="panel-content">
       <section class="box auth">
@@ -55,10 +69,14 @@
           <h3>로그인</h3>
           <input id="emailInput" type="email" placeholder="email" />
           <input id="passwordInput" type="password" placeholder="password (6+)" />
-          <input id="nameInput" type="text" placeholder="name (회원가입 시 사용)" />
+          <input id="nameInput" class="hidden" type="text" placeholder="name" />
           <div class="row">
             <button id="loginBtn">로그인</button>
             <button id="registerBtn" class="secondary">회원가입</button>
+          </div>
+          <div id="registerRow" class="row hidden">
+            <button id="registerSubmitBtn">회원가입 완료</button>
+            <button id="registerBackBtn" class="secondary">뒤로</button>
           </div>
         </div>
         <div id="authUser" class="hidden">
@@ -82,8 +100,33 @@
         <h3>내 저장 스팟</h3>
         <div id="savedSpotList" class="list"></div>
       </section>
+
+      <section class="box prefs">
+        <h3>표시 설정</h3>
+        <label class="toggle-line">
+          <input id="fabAutoToggle" type="checkbox" />
+          <span>플로팅 버튼 자동 모드 (모바일 아이콘)</span>
+        </label>
+        <label class="toggle-line">
+          <input id="fabCompactToggle" type="checkbox" />
+          <span>플로팅 버튼 아이콘만 표시</span>
+        </label>
+      </section>
     </div>
   </aside>
+  <button id="accountFabBtn" class="account-fab" aria-label="계정/저장 열기" aria-expanded="false">
+    <span class="fab-icon" aria-hidden="true">ID</span>
+    <span class="fab-label">계정/저장</span>
+    <span id="accountFabBadge" class="fab-badge hidden" aria-hidden="true"></span>
+  </button>
+
+  <noscript>
+    <section class="noscript-box">
+      <h1>체리 아틀라스 KR</h1>
+      <p>이 서비스는 지도를 통한 벚꽃 위치 검색/저장 기능을 제공합니다.</p>
+      <p>크롤러/봇용 문서: <a href="/robots.txt">robots.txt</a>, <a href="/sitemap.xml">sitemap.xml</a>, <a href="/llms.txt">llms.txt</a>, <a href="/api-discovery.json">api-discovery.json</a></p>
+    </section>
+  </noscript>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="/app.js"></script>

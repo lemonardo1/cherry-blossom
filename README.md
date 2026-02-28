@@ -18,7 +18,8 @@ docker run --rm -p 8080:8080 cherry-blossom-map:local
 
 참고:
 - 컨테이너는 `HOST=0.0.0.0`, `PORT=8080` 기준으로 실행됩니다.
-- JSON DB(`data/*.json`)는 컨테이너 내부 파일시스템을 사용합니다(재시작 시 비영속).
+- PostgreSQL은 외부 연결(`DATABASE_URL`)을 사용합니다.
+- `PUBLIC_BASE_URL`를 설정하면 `robots.txt`, `sitemap.xml`, `api-discovery.json`의 기준 URL로 사용됩니다.
 
 ## GCP (Cloud Run 준비)
 
@@ -49,12 +50,9 @@ gcloud run deploy cherry-blossom-map \
 
 - Frontend: Vanilla JS + Leaflet (`/public`)
 - Backend: Node.js built-in HTTP server (entry: `/server.js`, modules: `/src`)
-- Storage: JSON 파일 DB
-  - 사용자: `/data/users.json`
-  - 개인 저장 스팟: `/data/spots.json`
-  - 사용자 제보: `/data/reports.json`
-  - Overpass 캐시: `/data/overpass-cache.json`
-  - 서빙 카탈로그 스냅샷: `/data/places.json`
+- Storage: PostgreSQL + JSON seed files
+  - DB 테이블: `users`, `spots`, `reports`, `overpass_cache_entries`, `place_snapshots`
+  - 파일 입력(마이그레이션용): `/data/*.json`
   - 추천 데이터: `/data/cherry-curated.json`
 
 ## Backend Structure
@@ -69,15 +67,15 @@ gcloud run deploy cherry-blossom-map \
 - `src/routes/static.js`: 정적 파일 서빙
 - `src/services/cherry.js`: 벚꽃 데이터 집계
 - `src/services/overpass.js`: Overpass 쿼리/캐시
-- `src/lib/*`: 공통 유틸(HTTP, 인증, 파일 DB)
+- `src/lib/*`: 공통 유틸(HTTP, 인증, PostgreSQL)
 
 ## Services
 
 - `src/services/cherry.js`
-  - 역할: OSM + 추천(`cherry-curated.json`) + 승인 제보(`reports.json`)를 합쳐 지도용 요소 생성
-  - 입력: `bboxRaw`, `readJson/writeJson`, 파일 경로, Overpass 엔드포인트 목록
+  - 역할: OSM + 추천(`cherry-curated.json`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
+  - 입력: `bboxRaw`, DB 접근 함수, 파일 경로, Overpass 엔드포인트 목록
   - 출력: `{ elements, meta }` (`overpass/curated/community/total/cached/overpassError`)
-  - 부가 동작: 조회 결과를 `places.json`에 bbox 키별 스냅샷으로 저장
+  - 부가 동작: 조회 결과를 DB `place_snapshots`에 bbox 키별 스냅샷 저장
 - `src/services/overpass.js`
   - 역할: Overpass 쿼리 생성, bbox 파싱, 중복 제거, 원격 조회
   - 주요 함수: `buildKoreaAreaQuery`, `buildBboxQuery`, `parseBbox`, `fetchOverpass`, `dedupeElements`
@@ -86,10 +84,30 @@ gcloud run deploy cherry-blossom-map \
 ## Serving Strategy
 
 - `/api/osm/cherry`는 자체 DB를 우선 사용해 서빙합니다.
-  - Overpass 결과는 `overpass-cache.json`에 bbox 키 단위로 TTL 저장 (`bbox: 5분`, `korea: 30분`)
-  - Overpass 장애 시 만료된 캐시(stale)라도 있으면 폴백 서빙
-  - 사용자 제보는 `reports.json` 중 `status=approved`만 합쳐서 노출
-  - 최종 머지 결과는 `places.json`에 스냅샷으로 저장
+  - Overpass 결과는 DB `overpass_cache_entries`에 bbox 키 단위로 저장
+  - 캐시 정책: `stale-while-revalidate`
+  - fresh TTL: `bbox 5분`, `korea 30분`
+  - stale TTL: `bbox 24시간`, `korea 7일`
+  - fresh 만료 후 stale 구간이면 즉시 stale 응답 후 백그라운드 재검증
+  - 동일 키 동시 요청은 in-flight dedupe로 Overpass 중복 호출 방지
+  - 사용자 제보는 DB `reports` 중 `status=approved`만 합쳐서 노출
+  - 최종 머지 결과는 DB `place_snapshots`에 스냅샷으로 저장
+
+## PostgreSQL Setup
+
+- 환경 변수 설정
+  - `DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<db>`
+- JSON -> PostgreSQL 마이그레이션
+
+```bash
+npm run db:migrate:json
+```
+
+- 개발 서버 실행
+
+```bash
+npm run dev
+```
 
 ## API
 
@@ -108,7 +126,6 @@ gcloud run deploy cherry-blossom-map \
 
 ## Next Upgrade
 
-- JSON 파일 DB -> PostgreSQL(+Prisma) 교체
 - 세션 메모리 저장 -> Redis 세션/JWT 전환
 - 사용자 권한/프로필 고도화
 - Overpass 캐시를 Redis 기반으로 확장

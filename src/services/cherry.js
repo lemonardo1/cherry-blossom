@@ -1,3 +1,4 @@
+const fs = require("node:fs/promises");
 const {
   buildKoreaAreaQuery,
   buildBboxQuery,
@@ -9,18 +10,6 @@ const {
 } = require("./overpass");
 
 const refreshInFlight = new Map();
-
-function safeOverpassStore(raw) {
-  if (!raw || typeof raw !== "object") return { entries: [] };
-  if (!Array.isArray(raw.entries)) return { entries: [] };
-  return raw;
-}
-
-function safePlacesStore(raw) {
-  if (!raw || typeof raw !== "object") return { snapshots: {} };
-  if (!raw.snapshots || typeof raw.snapshots !== "object") return { snapshots: {} };
-  return raw;
-}
 
 function asCommunityElement(report) {
   return {
@@ -41,6 +30,12 @@ function asArray(raw) {
   return Array.isArray(raw) ? raw : [];
 }
 
+async function readJsonArray(file) {
+  const text = await fs.readFile(file, "utf8");
+  const parsed = JSON.parse(text);
+  return asArray(parsed);
+}
+
 function getTtlPolicy(hasBbox) {
   return hasBbox
     ? { ttlMs: 5 * 60 * 1000, staleTtlMs: 24 * 60 * 60 * 1000 }
@@ -54,18 +49,11 @@ function getStaleUntil(entry, staleTtlMs) {
   return 0;
 }
 
-function upsertCacheEntry(store, entry) {
-  store.entries = store.entries.filter((item) => item.key !== entry.key);
-  store.entries.push(entry);
-}
-
 async function revalidateCacheEntry({
   cacheKey,
   query,
   overpassEndpoints,
-  overpassCacheFile,
-  readJson,
-  writeJson,
+  upsertOverpassCacheEntry,
   ttlMs,
   staleTtlMs
 }) {
@@ -75,7 +63,6 @@ async function revalidateCacheEntry({
       const fetched = await fetchOverpass({ query, endpoints: overpassEndpoints });
       const now = Date.now();
       const nowIso = new Date(now).toISOString();
-      const store = safeOverpassStore(await readJson(overpassCacheFile));
       const nextEntry = {
         key: cacheKey,
         updatedAt: nowIso,
@@ -83,8 +70,7 @@ async function revalidateCacheEntry({
         staleUntil: now + staleTtlMs,
         elements: fetched.elements || []
       };
-      upsertCacheEntry(store, nextEntry);
-      await writeJson(overpassCacheFile, store);
+      await upsertOverpassCacheEntry(nextEntry);
       return nextEntry;
     } finally {
       refreshInFlight.delete(cacheKey);
@@ -96,12 +82,12 @@ async function revalidateCacheEntry({
 
 async function loadCherryElements({
   bboxRaw,
-  readJson,
-  writeJson,
   curatedFile,
-  reportsFile,
-  overpassCacheFile,
-  placesFile,
+  listApprovedReports,
+  getOverpassCacheEntry,
+  upsertOverpassCacheEntry,
+  getPlaceSnapshot,
+  upsertPlaceSnapshot,
   overpassEndpoints
 }) {
   const hasBbox = Boolean(bboxRaw);
@@ -112,8 +98,7 @@ async function loadCherryElements({
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
-  const overpassStore = safeOverpassStore(await readJson(overpassCacheFile));
-  const cachedEntry = overpassStore.entries.find((entry) => entry.key === roundedKey) || null;
+  const cachedEntry = await getOverpassCacheEntry(roundedKey);
   let overpassData;
   const expiresAt = cachedEntry?.expiresAt || 0;
   const staleUntil = getStaleUntil(cachedEntry, staleTtlMs);
@@ -128,9 +113,7 @@ async function loadCherryElements({
       cacheKey: roundedKey,
       query,
       overpassEndpoints,
-      overpassCacheFile,
-      readJson,
-      writeJson,
+      upsertOverpassCacheEntry,
       ttlMs,
       staleTtlMs
     }).catch(() => {});
@@ -140,9 +123,7 @@ async function loadCherryElements({
         cacheKey: roundedKey,
         query,
         overpassEndpoints,
-        overpassCacheFile,
-        readJson,
-        writeJson,
+        upsertOverpassCacheEntry,
         ttlMs,
         staleTtlMs
       });
@@ -168,8 +149,8 @@ async function loadCherryElements({
     }
   }
 
-  const curated = asArray(await readJson(curatedFile));
-  const reports = asArray(await readJson(reportsFile));
+  const curated = await readJsonArray(curatedFile);
+  const reports = asArray(await listApprovedReports());
   const curatedElements = curated
     .filter((p) => isInsideBbox(p, bbox))
     .map((p) => ({
@@ -184,8 +165,7 @@ async function loadCherryElements({
         "cherry:type": "curated"
       }
     }));
-  const approvedReports = reports.filter((r) => r.status === "approved");
-  const communityElements = approvedReports
+  const communityElements = reports
     .filter((p) => isInsideBbox(p, bbox))
     .map(asCommunityElement);
 
@@ -209,16 +189,16 @@ async function loadCherryElements({
     }
   };
 
-  if (!overpassData.cached || overpassData.stale || !overpassData.error) {
-    const placesStore = safePlacesStore(await readJson(placesFile));
-    placesStore.snapshots[roundedKey] = {
+  const existingSnapshot = await getPlaceSnapshot(roundedKey);
+  const shouldWriteSnapshot = !existingSnapshot || !overpassData.cached || overpassData.stale;
+  if (shouldWriteSnapshot) {
+    await upsertPlaceSnapshot({
       key: roundedKey,
       bbox: bbox || null,
       generatedAt: nowIso,
       elements: merged,
       meta: result.meta
-    };
-    await writeJson(placesFile, placesStore);
+    });
   }
 
   return result;

@@ -25,8 +25,8 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser 
         return sendJson(res, 400, { error: "invalid_input", message: "email/password(6+) 필요" });
       }
 
-      const users = await readJson(usersFile);
-      if (users.some((u) => u.email === email)) {
+      const existing = await readJson(usersFile, { email });
+      if (existing) {
         return sendJson(res, 409, { error: "email_exists" });
       }
 
@@ -37,8 +37,7 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser 
         passwordHash: hashPassword(password),
         createdAt: new Date().toISOString()
       };
-      users.push(user);
-      await writeJson(usersFile, users);
+      await writeJson(usersFile, user);
 
       const token = makeId();
       sessions.set(token, user.id);
@@ -56,8 +55,7 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser 
 
       const email = String(body.email || "").trim().toLowerCase();
       const password = String(body.password || "");
-      const users = await readJson(usersFile);
-      const user = users.find((u) => u.email === email);
+      const user = await readJson(usersFile, { email });
       if (!user || !verifyPassword(password, user.passwordHash)) {
         return sendJson(res, 401, { error: "invalid_credentials" });
       }

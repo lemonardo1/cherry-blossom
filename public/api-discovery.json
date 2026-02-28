@@ -1,0 +1,35 @@
+{
+  "name": "Cherry Atlas KR API",
+  "version": "1.0.0",
+  "description": "Korea cherry blossom map API discovery document",
+  "basePath": "/",
+  "publicEndpoints": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "description": "Service health check"
+    },
+    {
+      "method": "GET",
+      "path": "/api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat",
+      "description": "Cherry points in map bounds"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports",
+      "description": "Approved community reports"
+    }
+  ],
+  "authEndpoints": [
+    "POST /api/auth/register",
+    "POST /api/auth/login",
+    "POST /api/auth/logout",
+    "GET /api/auth/me",
+    "GET /api/spots?mine=1",
+    "POST /api/spots",
+    "DELETE /api/spots/:id",
+    "GET /api/reports?mine=1",
+    "POST /api/reports",
+    "PATCH /api/reports/:id"
+  ]
+}

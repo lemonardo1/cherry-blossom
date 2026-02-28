@@ -6,8 +6,7 @@ function createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authU
     if (req.method === "GET" && url.pathname === "/api/spots") {
       const user = await authUser(req);
       const mine = url.searchParams.get("mine") === "1";
-      const spots = await readJson(spotsFile);
-      const data = mine && user ? spots.filter((s) => s.userId === user.id) : spots;
+      const data = await readJson(spotsFile, { mine, userId: user?.id || null });
       return sendJson(res, 200, { spots: data });
     }
 
@@ -30,7 +29,6 @@ function createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authU
         return sendJson(res, 400, { error: "invalid_input" });
       }
 
-      const spots = await readJson(spotsFile);
       const spot = {
         id: makeId(),
         userId: user.id,
@@ -40,11 +38,9 @@ function createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authU
         memo,
         createdAt: new Date().toISOString()
       };
-      spots.push(spot);
-      await writeJson(spotsFile, spots);
+      await writeJson(spotsFile, spot);
 
-      const reports = await readJson(reportsFile);
-      reports.push({
+      await writeJson(reportsFile, {
         id: makeId(),
         userId: user.id,
         spotId: spot.id,
@@ -56,7 +52,6 @@ function createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authU
         createdAt: spot.createdAt,
         updatedAt: spot.createdAt
       });
-      await writeJson(reportsFile, reports);
 
       return sendJson(res, 201, { spot });
     }
@@ -65,16 +60,18 @@ function createSpotsHandler({ spotsFile, reportsFile, readJson, writeJson, authU
       const user = await authUser(req);
       if (!user) return sendJson(res, 401, { error: "auth_required" });
       const id = url.pathname.split("/").pop();
-      const spots = await readJson(spotsFile);
-      const idx = spots.findIndex((s) => s.id === id && s.userId === user.id);
-      if (idx < 0) return sendJson(res, 404, { error: "not_found" });
-      const removed = spots[idx];
-      spots.splice(idx, 1);
-      await writeJson(spotsFile, spots);
+      const removed = await writeJson(spotsFile, {
+        op: "deleteByUserAndId",
+        spotId: id,
+        userId: user.id
+      });
+      if (!removed) return sendJson(res, 404, { error: "not_found" });
 
-      const reports = await readJson(reportsFile);
-      const nextReports = reports.filter((r) => !(r.userId === user.id && r.spotId === removed.id));
-      await writeJson(reportsFile, nextReports);
+      await writeJson(reportsFile, {
+        op: "deleteBySpotAndUser",
+        spotId: removed.id,
+        userId: user.id
+      });
 
       return sendJson(res, 200, { ok: true });
     }
