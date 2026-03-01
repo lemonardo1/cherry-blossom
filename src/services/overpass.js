@@ -86,12 +86,30 @@ function dedupeElements(elements) {
   return out;
 }
 
-async function fetchOverpass({ query, endpoints }) {
+function logOverpass(logContext, message, extra = {}) {
+  if (!logContext?.enabled) return;
+  if (logContext.detail === false && message !== "endpoint_success" && message !== "endpoint_error") return;
+  const rid = logContext.requestId || "n/a";
+  const entries = Object.entries(extra).filter(([, value]) => value !== undefined);
+  const suffix = entries.length
+    ? ` ${entries.map(([key, value]) => `${key}=${String(value)}`).join(" ")}`
+    : "";
+  console.info(`[overpass][${rid}] ${message}${suffix}`);
+}
+
+async function fetchOverpass({ query, endpoints, logContext }) {
   const body = new URLSearchParams({ data: query });
   let lastError = null;
 
-  for (const endpoint of endpoints) {
+  for (let i = 0; i < endpoints.length; i += 1) {
+    const endpoint = endpoints[i];
+    const attemptStart = Date.now();
     try {
+      logOverpass(logContext, "endpoint_try", {
+        attempt: i + 1,
+        total: endpoints.length,
+        endpoint
+      });
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
@@ -101,9 +119,22 @@ async function fetchOverpass({ query, endpoints }) {
       if (!response.ok) throw new Error(`overpass_failed_${response.status}`);
       const data = await response.json();
       const elements = data.elements || [];
+      logOverpass(logContext, "endpoint_success", {
+        attempt: i + 1,
+        endpoint,
+        status: response.status,
+        elapsed_ms: Date.now() - attemptStart,
+        elements: elements.length
+      });
       return { elements };
     } catch (error) {
       lastError = error;
+      logOverpass(logContext, "endpoint_error", {
+        attempt: i + 1,
+        endpoint,
+        elapsed_ms: Date.now() - attemptStart,
+        message: error.message || "unknown"
+      });
     }
   }
 

@@ -11,7 +11,10 @@ const {
   OVERPASS_TTL_BBOX_MS,
   OVERPASS_STALE_TTL_BBOX_MS,
   OVERPASS_TTL_KOREA_MS,
-  OVERPASS_STALE_TTL_KOREA_MS
+  OVERPASS_STALE_TTL_KOREA_MS,
+  OVERPASS_SNAPSHOT_TTL_MS,
+  OVERPASS_LOG_ENABLED,
+  OVERPASS_LOG_DETAIL
 } = require("./config");
 const { sendJson } = require("./lib/http");
 const db = require("./lib/db");
@@ -31,7 +34,12 @@ async function main() {
       bboxTtlMs: OVERPASS_TTL_BBOX_MS,
       bboxStaleTtlMs: OVERPASS_STALE_TTL_BBOX_MS,
       koreaTtlMs: OVERPASS_TTL_KOREA_MS,
-      koreaStaleTtlMs: OVERPASS_STALE_TTL_KOREA_MS
+      koreaStaleTtlMs: OVERPASS_STALE_TTL_KOREA_MS,
+      snapshotTtlMs: OVERPASS_SNAPSHOT_TTL_MS
+    },
+    overpassLogOptions: {
+      enabled: OVERPASS_LOG_ENABLED,
+      detail: OVERPASS_LOG_DETAIL
     },
     db
   });

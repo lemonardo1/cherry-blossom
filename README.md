@@ -85,6 +85,7 @@ gcloud run deploy cherry-blossom-map \
 
 - `/api/osm/cherry`는 자체 DB를 우선 사용해 서빙합니다.
   - Overpass 결과는 DB `overpass_cache_entries`에 bbox 키 단위로 저장
+  - 머지 결과는 DB `place_snapshots`에 저장하고, 짧은 TTL 내 재조회 시 snapshot에서 즉시 응답
   - 캐시 정책: `stale-while-revalidate`
   - fresh TTL: `bbox 5분`, `korea 30분`
   - stale TTL: `bbox 24시간`, `korea 7일`
@@ -103,10 +104,23 @@ gcloud run deploy cherry-blossom-map \
     - `OVERPASS_STALE_TTL_BBOX_MS=86400000` (기본 24시간)
     - `OVERPASS_TTL_KOREA_MS=1800000` (기본 30분)
     - `OVERPASS_STALE_TTL_KOREA_MS=604800000` (기본 7일)
+    - `OVERPASS_SNAPSHOT_TTL_MS=60000` (기본 60초, `place_snapshots` 응답 캐시 TTL)
+  - 선택(Overpass 로그)
+    - `OVERPASS_LOG_ENABLED=true` (기본 true)
+    - `OVERPASS_LOG_DETAIL=true` (기본 true, false면 핵심 로그만)
 - JSON -> PostgreSQL 마이그레이션
 
 ```bash
 npm run db:migrate:json
+```
+
+- CSV -> PostgreSQL 대량 적재(추천/내부 스팟)
+
+```bash
+# 헤더 예시: id,name,lat,lon,region,memo,status
+npm run db:import:csv -- --file ./data/cherry-extra.csv --mode curated
+npm run db:import:csv -- --file ./data/cherry-extra.csv --mode internal
+npm run db:import:csv -- --file ./data/cherry-extra.csv --mode curated --dry-run true
 ```
 
 - 개발 서버 실행

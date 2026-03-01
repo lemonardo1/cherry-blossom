@@ -18,6 +18,14 @@ function parsePrecision(value, fallback) {
   return parsed;
 }
 
+function parseBool(value, fallback) {
+  if (value == null) return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 module.exports = {
   PORT: process.env.PORT || 3000,
   HOST: process.env.HOST || "0.0.0.0",
@@ -38,5 +46,8 @@ module.exports = {
   OVERPASS_TTL_BBOX_MS: parsePositiveInt(process.env.OVERPASS_TTL_BBOX_MS, 5 * 60 * 1000),
   OVERPASS_STALE_TTL_BBOX_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_BBOX_MS, 24 * 60 * 60 * 1000),
   OVERPASS_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_TTL_KOREA_MS, 30 * 60 * 1000),
-  OVERPASS_STALE_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_KOREA_MS, 7 * 24 * 60 * 60 * 1000)
+  OVERPASS_STALE_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_KOREA_MS, 7 * 24 * 60 * 60 * 1000),
+  OVERPASS_SNAPSHOT_TTL_MS: parsePositiveInt(process.env.OVERPASS_SNAPSHOT_TTL_MS, 60 * 1000),
+  OVERPASS_LOG_ENABLED: parseBool(process.env.OVERPASS_LOG_ENABLED, true),
+  OVERPASS_LOG_DETAIL: parseBool(process.env.OVERPASS_LOG_DETAIL, true)
 };

@@ -12,6 +12,7 @@ function createApiHandler({
   reportsFile,
   overpassEndpoints,
   overpassCacheOptions,
+  overpassLogOptions,
   db
 }) {
   async function authUser(req) {
@@ -82,7 +83,8 @@ function createApiHandler({
     createOsmHandler({
       db,
       overpassEndpoints,
-      overpassCacheOptions
+      overpassCacheOptions,
+      overpassLogOptions
     })
   ];
 

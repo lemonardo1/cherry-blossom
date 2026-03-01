@@ -62,6 +62,9 @@ const manualPickLayer = L.layerGroup().addTo(map);
 const markerMap = new Map();
 let manualPickMarker = null;
 let adminSelectedPoint = null;
+let fetchCherryDebounceTimer = null;
+let activeCherryFetchController = null;
+let fetchCherrySeq = 0;
 
 function isManualPickEnabled() {
   return Boolean(els.enableMapPickToggle && els.enableMapPickToggle.checked);
@@ -290,15 +293,40 @@ function renderList() {
 }
 
 async function fetchCherry() {
+  const reqSeq = ++fetchCherrySeq;
+  if (activeCherryFetchController) {
+    activeCherryFetchController.abort();
+  }
+  const controller = new AbortController();
+  activeCherryFetchController = controller;
   const b = map.getBounds();
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
   setStatus("Overpass 데이터 조회 중...");
-  const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}`);
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "조회 실패");
-  lastMeta = json.meta || null;
-  features = normalize(json.elements || []);
-  filterFeatures();
+  try {
+    const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}`, {
+      signal: controller.signal
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "조회 실패");
+    if (reqSeq !== fetchCherrySeq) return;
+    lastMeta = json.meta || null;
+    features = normalize(json.elements || []);
+    filterFeatures();
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    throw error;
+  } finally {
+    if (activeCherryFetchController === controller) {
+      activeCherryFetchController = null;
+    }
+  }
+}
+
+function scheduleFetchCherry() {
+  if (fetchCherryDebounceTimer) clearTimeout(fetchCherryDebounceTimer);
+  fetchCherryDebounceTimer = setTimeout(() => {
+    fetchCherry().catch((err) => setStatus(`오류: ${err.message}`));
+  }, 700);
 }
 
 function markerStyleByKind(kind) {
@@ -648,9 +676,8 @@ if (els.saveAdminSpotBtn) {
 }
 
 map.on("moveend", () => {
-  if (map.getZoom() >= 8) {
-    fetchCherry().catch((err) => setStatus(`오류: ${err.message}`));
-  }
+  if (map.getZoom() < 8) return;
+  scheduleFetchCherry();
 });
 
 map.on("click", (event) => {

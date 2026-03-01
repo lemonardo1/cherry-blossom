@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "db:migrate:json": "node scripts/migrate-json-to-postgres.js"
+    "db:migrate:json": "node scripts/migrate-json-to-postgres.js",
+    "db:import:csv": "node scripts/import-cherry-csv.js"
   },
   "dependencies": {
     "pg": "^8.19.0"
