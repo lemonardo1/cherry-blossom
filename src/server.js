@@ -13,6 +13,7 @@ const {
   OVERPASS_TTL_KOREA_MS,
   OVERPASS_STALE_TTL_KOREA_MS,
   OVERPASS_SNAPSHOT_TTL_MS,
+  OVERPASS_MAX_BBOX_AREA,
   OVERPASS_LOG_ENABLED,
   OVERPASS_LOG_DETAIL
 } = require("./config");
@@ -35,7 +36,8 @@ async function main() {
       bboxStaleTtlMs: OVERPASS_STALE_TTL_BBOX_MS,
       koreaTtlMs: OVERPASS_TTL_KOREA_MS,
       koreaStaleTtlMs: OVERPASS_STALE_TTL_KOREA_MS,
-      snapshotTtlMs: OVERPASS_SNAPSHOT_TTL_MS
+      snapshotTtlMs: OVERPASS_SNAPSHOT_TTL_MS,
+      maxBboxArea: OVERPASS_MAX_BBOX_AREA
     },
     overpassLogOptions: {
       enabled: OVERPASS_LOG_ENABLED,

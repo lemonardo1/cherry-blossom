@@ -49,6 +49,23 @@ CREATE TABLE IF NOT EXISTS overpass_cache_entries (
   elements JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS osm_cherry_spots (
+  osm_key TEXT PRIMARY KEY,
+  osm_type TEXT NOT NULL CHECK (osm_type IN ('node', 'way', 'relation')),
+  osm_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  lat DOUBLE PRECISION NOT NULL,
+  lon DOUBLE PRECISION NOT NULL,
+  tags JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS osm_cherry_spots_status_idx ON osm_cherry_spots(status);
+CREATE INDEX IF NOT EXISTS osm_cherry_spots_lat_lon_idx ON osm_cherry_spots(lat, lon);
+
 CREATE TABLE IF NOT EXISTS place_snapshots (
   cache_key TEXT PRIMARY KEY,
   bbox JSONB NULL,

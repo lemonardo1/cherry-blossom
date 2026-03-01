@@ -48,6 +48,7 @@ module.exports = {
   OVERPASS_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_TTL_KOREA_MS, 30 * 60 * 1000),
   OVERPASS_STALE_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_KOREA_MS, 7 * 24 * 60 * 60 * 1000),
   OVERPASS_SNAPSHOT_TTL_MS: parsePositiveInt(process.env.OVERPASS_SNAPSHOT_TTL_MS, 60 * 1000),
+  OVERPASS_MAX_BBOX_AREA: Number.parseFloat(process.env.OVERPASS_MAX_BBOX_AREA || "0.08"),
   OVERPASS_LOG_ENABLED: parseBool(process.env.OVERPASS_LOG_ENABLED, true),
   OVERPASS_LOG_DETAIL: parseBool(process.env.OVERPASS_LOG_DETAIL, true)
 };

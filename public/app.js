@@ -1,7 +1,49 @@
+const DEFAULT_VIEW = { lat: 37.52974, lng: 126.99886, zoom: 12 };
+const VIEW_URL_KEYS = { lat: "lat", lng: "lng", zoom: "z" };
+const MAX_MAP_ZOOM = 20;
+
+function parseViewFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const latRaw = Number(params.get(VIEW_URL_KEYS.lat));
+  const lngRaw = Number(params.get(VIEW_URL_KEYS.lng));
+  const zoomRaw = Number(params.get(VIEW_URL_KEYS.zoom));
+  const hasLat = Number.isFinite(latRaw) && latRaw >= -90 && latRaw <= 90;
+  const hasLng = Number.isFinite(lngRaw) && lngRaw >= -180 && lngRaw <= 180;
+  const hasZoom = Number.isFinite(zoomRaw);
+  if (!hasLat || !hasLng || !hasZoom) return DEFAULT_VIEW;
+  return {
+    lat: latRaw,
+    lng: lngRaw,
+    zoom: Math.max(1, Math.min(MAX_MAP_ZOOM, zoomRaw))
+  };
+}
+
+function updateViewUrlParams() {
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const params = new URLSearchParams(window.location.search);
+  const nextLat = center.lat.toFixed(5);
+  const nextLng = center.lng.toFixed(5);
+  const nextZoom = String(Math.round(zoom * 100) / 100);
+  if (
+    params.get(VIEW_URL_KEYS.lat) === nextLat &&
+    params.get(VIEW_URL_KEYS.lng) === nextLng &&
+    params.get(VIEW_URL_KEYS.zoom) === nextZoom
+  ) {
+    return;
+  }
+  params.set(VIEW_URL_KEYS.lat, nextLat);
+  params.set(VIEW_URL_KEYS.lng, nextLng);
+  params.set(VIEW_URL_KEYS.zoom, nextZoom);
+  const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ""}`;
+  window.history.replaceState(null, "", nextUrl);
+}
+
+const initialView = parseViewFromUrl();
 const map = L.map("map", {
   zoomControl: false,
   preferCanvas: true
-}).setView([36.35, 127.8], 7);
+}).setView([initialView.lat, initialView.lng], initialView.zoom);
 
 L.control.zoom({ position: "topright" }).addTo(map);
 
@@ -14,9 +56,14 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 const els = {
   leftPanel: document.getElementById("leftPanel"),
   rightPanel: document.getElementById("rightPanel"),
+  rightPanelTitle: document.getElementById("rightPanelTitle"),
   toggleSearchPanelBtn: document.getElementById("toggleSearchPanelBtn"),
   closeAccountPanelBtn: document.getElementById("closeAccountPanelBtn"),
   accountFabBtn: document.getElementById("accountFabBtn"),
+  saveSpotBox: document.getElementById("saveSpotBox"),
+  saveSpotTitle: document.getElementById("saveSpotTitle"),
+  mapPickToggleLine: document.getElementById("mapPickToggleLine"),
+  prefsBox: document.getElementById("prefsBox"),
   accountFabBadge: document.getElementById("accountFabBadge"),
   fabAutoToggle: document.getElementById("fabAutoToggle"),
   fabCompactToggle: document.getElementById("fabCompactToggle"),
@@ -68,6 +115,20 @@ let adminSelectedPoints = [];
 let fetchCherryDebounceTimer = null;
 let activeCherryFetchController = null;
 let fetchCherrySeq = 0;
+let lastRequestedFetchPlanKey = "";
+const MIN_FETCH_ZOOM = 10;
+const MAX_FETCH_BBOX_AREA = 0.08;
+const FETCH_BBOX_PRECISION = 3;
+const HIGH_ZOOM_PREFETCH_MIN_ZOOM = 16;
+const PREFETCH_TILE_RADIUS = 1;
+const KIND_SHORTCUT_MAP = {
+  "1": "all",
+  "2": "tree",
+  "3": "place",
+  "4": "curated",
+  "5": "internal",
+  "6": "community"
+};
 
 function isManualPickEnabled() {
   return Boolean(els.enableMapPickToggle && els.enableMapPickToggle.checked);
@@ -95,6 +156,10 @@ function setAuthGuestDepth(registerDepth) {
 }
 
 function setAuthUI() {
+  const admin = isAdminUser();
+  document.body.classList.toggle("admin-mode", admin);
+  document.body.classList.toggle("viewer-mode", !admin);
+
   if (user) {
     els.authGuest.classList.add("hidden");
     els.authUser.classList.remove("hidden");
@@ -107,7 +172,7 @@ function setAuthUI() {
     setAuthGuestDepth(false);
   }
   if (els.adminSpotBox) {
-    const showAdmin = isAdminUser();
+    const showAdmin = admin;
     els.adminSpotBox.classList.toggle("hidden", !showAdmin);
     if (!showAdmin) {
       clearAdminSelectedPoints();
@@ -115,6 +180,23 @@ function setAuthUI() {
       if (els.enableAdminPickToggle) els.enableAdminPickToggle.checked = false;
       setAdminSelectedSpotHint();
     }
+  }
+  if (els.prefsBox) els.prefsBox.classList.toggle("hidden", !admin);
+  if (els.rightPanelTitle) {
+    els.rightPanelTitle.textContent = admin ? "계정/저장" : "즐겨찾기";
+  }
+  if (els.saveSpotTitle) {
+    els.saveSpotTitle.textContent = admin ? "선택 지점 저장" : "즐겨찾기 저장";
+  }
+  if (els.saveSpotBtn) {
+    els.saveSpotBtn.textContent = admin ? "내 스팟 저장" : "즐겨찾기 추가";
+  }
+  if (els.accountFabBtn) {
+    const icon = els.accountFabBtn.querySelector(".fab-icon");
+    const label = els.accountFabBtn.querySelector(".fab-label");
+    if (icon) icon.textContent = admin ? "ID" : "★";
+    if (label) label.textContent = admin ? "계정/저장" : "메뉴";
+    els.accountFabBtn.setAttribute("aria-label", admin ? "계정/저장 열기" : "즐겨찾기 메뉴 열기");
   }
   updateAccountFabBadge();
 }
@@ -195,6 +277,19 @@ function normalize(elements) {
       };
     })
     .filter(Boolean);
+}
+
+function normalizeUnique(elements) {
+  const normalized = normalize(elements);
+  const seen = new Set();
+  const out = [];
+  normalized.forEach((feature) => {
+    const key = feature.id || `${feature.lat.toFixed(5)}:${feature.lon.toFixed(5)}:${feature.name.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(feature);
+  });
+  return out;
 }
 
 function filterFeatures() {
@@ -330,7 +425,7 @@ function renderFeatures() {
 
   renderList();
   const metaText = lastMeta
-    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 내부DB ${lastMeta.internal || 0} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}${lastMeta.overpassError ? " | OSM 장애(폴백)" : ""}`
+    ? ` | OSM ${lastMeta.overpass} + 추천 ${lastMeta.curated} + 내부DB ${lastMeta.internal || 0} + 커뮤니티 ${lastMeta.community}${lastMeta.cached ? " (cache)" : ""}${lastMeta.prefetchEnabled ? ` | 타일 ${lastMeta.prefetchLoaded}/${lastMeta.prefetchTotal}` : ""}${lastMeta.prefetchPartial ? " | 주변 타일 일부 실패" : ""}${lastMeta.overpassError === "bbox_too_large" ? " | 지도 확대 필요" : (lastMeta.overpassError ? " | OSM 장애(폴백)" : "")}`
     : "";
   setStatus(`조회 ${features.length.toLocaleString()}건 / 표시 ${filtered.length.toLocaleString()}건${metaText}`);
 }
@@ -357,26 +452,231 @@ function renderList() {
   });
 }
 
-async function fetchCherry() {
+function getRoundedBboxString() {
+  const b = map.getBounds();
+  return [
+    b.getWest().toFixed(FETCH_BBOX_PRECISION),
+    b.getSouth().toFixed(FETCH_BBOX_PRECISION),
+    b.getEast().toFixed(FETCH_BBOX_PRECISION),
+    b.getNorth().toFixed(FETCH_BBOX_PRECISION)
+  ].join(",");
+}
+
+function parseBboxString(bbox) {
+  const [minLon, minLat, maxLon, maxLat] = String(bbox).split(",").map(Number);
+  if ([minLon, minLat, maxLon, maxLat].some((v) => !Number.isFinite(v))) return null;
+  return { minLon, minLat, maxLon, maxLat };
+}
+
+function formatBbox({ minLon, minLat, maxLon, maxLat }) {
+  return [
+    minLon.toFixed(FETCH_BBOX_PRECISION),
+    minLat.toFixed(FETCH_BBOX_PRECISION),
+    maxLon.toFixed(FETCH_BBOX_PRECISION),
+    maxLat.toFixed(FETCH_BBOX_PRECISION)
+  ].join(",");
+}
+
+function clampLat(lat) {
+  return Math.max(-85, Math.min(85, lat));
+}
+
+function clampLon(lon) {
+  return Math.max(-180, Math.min(180, lon));
+}
+
+function buildFetchBboxes(baseBbox, zoom) {
+  if (zoom < HIGH_ZOOM_PREFETCH_MIN_ZOOM) return [baseBbox];
+  const parsed = parseBboxString(baseBbox);
+  if (!parsed) return [baseBbox];
+  const lonSpan = Math.max(0, parsed.maxLon - parsed.minLon);
+  const latSpan = Math.max(0, parsed.maxLat - parsed.minLat);
+  if (lonSpan <= 0 || latSpan <= 0) return [baseBbox];
+
+  const bboxes = [baseBbox];
+  const seen = new Set([baseBbox]);
+  for (let dy = -PREFETCH_TILE_RADIUS; dy <= PREFETCH_TILE_RADIUS; dy += 1) {
+    for (let dx = -PREFETCH_TILE_RADIUS; dx <= PREFETCH_TILE_RADIUS; dx += 1) {
+      if (dx === 0 && dy === 0) continue;
+      const candidate = formatBbox({
+        minLon: clampLon(parsed.minLon + lonSpan * dx),
+        minLat: clampLat(parsed.minLat + latSpan * dy),
+        maxLon: clampLon(parsed.maxLon + lonSpan * dx),
+        maxLat: clampLat(parsed.maxLat + latSpan * dy)
+      });
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      bboxes.push(candidate);
+    }
+  }
+  return bboxes;
+}
+
+async function fetchCherryByBbox(bbox, signal) {
+  const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}`, { signal });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || "조회 실패");
+  return json;
+}
+
+function mergeElementsUnique(elementGroups) {
+  const merged = [];
+  const seen = new Set();
+  elementGroups.forEach((group) => {
+    (group || []).forEach((el) => {
+      const key = `${el.type || "node"}:${String(el.id ?? "")}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(el);
+    });
+  });
+  return merged;
+}
+
+function buildMetaFromMergedElements(elements, prefetchTotal, prefetchLoaded, hasPartialFailures, tileMetas = []) {
+  let overpass = 0;
+  let curated = 0;
+  let internal = 0;
+  let community = 0;
+  elements.forEach((el) => {
+    const source = String(el?.tags?.source || "").toLowerCase();
+    if (source === "curated") curated += 1;
+    else if (source === "internal") internal += 1;
+    else if (source === "community") community += 1;
+    else overpass += 1;
+  });
+  return {
+    overpass,
+    curated,
+    internal,
+    community,
+    total: elements.length,
+    prefetchTotal,
+    prefetchLoaded,
+    prefetchEnabled: prefetchTotal > 1,
+    prefetchPartial: hasPartialFailures,
+    cached: tileMetas.length > 0 && tileMetas.every((meta) => Boolean(meta?.cached)),
+    stale: tileMetas.some((meta) => Boolean(meta?.stale)),
+    revalidating: tileMetas.some((meta) => Boolean(meta?.revalidating)),
+    overpassError: tileMetas.find((meta) => meta?.overpassError)?.overpassError || null
+  };
+}
+
+function logCherryLoadComplete({ reqSeq, fetchBboxes, loadedTiles, partialFailures, startedAt }) {
+  const elapsed = Date.now() - startedAt;
+  const completedAt = new Date().toISOString();
+  console.info(
+    `[cherry_ui] load_complete seq=${reqSeq} elapsed_ms=${elapsed} completed_at=${completedAt} tiles=${loadedTiles}/${fetchBboxes.length} partial=${partialFailures}`
+  );
+}
+
+function getBboxAreaFromString(bbox) {
+  const [minLon, minLat, maxLon, maxLat] = bbox.split(",").map(Number);
+  if ([minLon, minLat, maxLon, maxLat].some((v) => !Number.isFinite(v))) return Infinity;
+  return Math.max(0, maxLon - minLon) * Math.max(0, maxLat - minLat);
+}
+
+function shouldFetchCherryForView() {
+  if (map.getZoom() < MIN_FETCH_ZOOM) {
+    return { ok: false, reason: "zoom" };
+  }
+  const bbox = getRoundedBboxString();
+  const area = getBboxAreaFromString(bbox);
+  if (area > MAX_FETCH_BBOX_AREA) {
+    return { ok: false, reason: "area", bbox, area };
+  }
+  return { ok: true, bbox, area };
+}
+
+async function fetchCherry(force = false) {
+  const check = shouldFetchCherryForView();
+  if (!check.ok && !force) {
+    if (activeCherryFetchController) {
+      activeCherryFetchController.abort();
+      activeCherryFetchController = null;
+    }
+    if (check.reason === "zoom") {
+      setStatus(`지도를 더 확대하세요 (줌 ${MIN_FETCH_ZOOM}+에서 데이터 조회)`);
+    } else {
+      setStatus("조회 범위가 너무 넓습니다. 지도를 더 확대하세요.");
+    }
+    return;
+  }
+  const bbox = check.bbox || getRoundedBboxString();
+  const fetchBboxes = buildFetchBboxes(bbox, map.getZoom());
+  const fetchPlanKey = fetchBboxes.join("|");
+  if (!force && fetchPlanKey === lastRequestedFetchPlanKey) return;
+  lastRequestedFetchPlanKey = fetchPlanKey;
   const reqSeq = ++fetchCherrySeq;
   if (activeCherryFetchController) {
     activeCherryFetchController.abort();
   }
   const controller = new AbortController();
   activeCherryFetchController = controller;
-  const b = map.getBounds();
-  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
-  setStatus("Overpass 데이터 조회 중...");
+  const fetchStartedAt = Date.now();
+  setStatus(
+    fetchBboxes.length > 1
+      ? `Overpass 데이터 조회 중... (타일 ${fetchBboxes.length}개)`
+      : "Overpass 데이터 조회 중..."
+  );
   try {
-    const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}`, {
-      signal: controller.signal
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "조회 실패");
+    const [primaryBbox, ...neighborBboxes] = fetchBboxes;
+    const primary = await fetchCherryByBbox(primaryBbox, controller.signal);
     if (reqSeq !== fetchCherrySeq) return;
-    lastMeta = json.meta || null;
-    features = normalize(json.elements || []);
+    if (!neighborBboxes.length) {
+      const primaryMeta = primary.meta || {};
+      lastMeta = {
+        ...primaryMeta,
+        prefetchTotal: 1,
+        prefetchLoaded: 1,
+        prefetchEnabled: false,
+        prefetchPartial: false
+      };
+      features = normalizeUnique(primary.elements || []);
+      filterFeatures();
+      logCherryLoadComplete({
+        reqSeq,
+        fetchBboxes,
+        loadedTiles: 1,
+        partialFailures: false,
+        startedAt: fetchStartedAt
+      });
+      return;
+    }
+
+    let mergedElements = mergeElementsUnique([primary.elements || []]);
+    let loadedTiles = 1;
+    let partialFailures = false;
+    let tileMetas = [primary.meta || null];
+    lastMeta = buildMetaFromMergedElements(mergedElements, fetchBboxes.length, loadedTiles, partialFailures, tileMetas);
+    features = normalizeUnique(mergedElements);
     filterFeatures();
+
+    const settled = await Promise.allSettled(
+      neighborBboxes.map((tileBbox) => fetchCherryByBbox(tileBbox, controller.signal))
+    );
+    if (reqSeq !== fetchCherrySeq) return;
+    const groups = [primary.elements || []];
+    settled.forEach((result) => {
+      if (result.status === "fulfilled") {
+        loadedTiles += 1;
+        groups.push(result.value.elements || []);
+        tileMetas.push(result.value.meta || null);
+      } else {
+        partialFailures = true;
+      }
+    });
+    mergedElements = mergeElementsUnique(groups);
+    lastMeta = buildMetaFromMergedElements(mergedElements, fetchBboxes.length, loadedTiles, partialFailures, tileMetas);
+    features = normalizeUnique(mergedElements);
+    filterFeatures();
+    logCherryLoadComplete({
+      reqSeq,
+      fetchBboxes,
+      loadedTiles,
+      partialFailures,
+      startedAt: fetchStartedAt
+    });
   } catch (error) {
     if (error?.name === "AbortError") return;
     throw error;
@@ -388,18 +688,22 @@ async function fetchCherry() {
 }
 
 function scheduleFetchCherry() {
+  const zoom = map.getZoom();
+  const debounceMs = zoom >= 16 ? 220 : (zoom >= 14 ? 500 : 900);
   if (fetchCherryDebounceTimer) clearTimeout(fetchCherryDebounceTimer);
   fetchCherryDebounceTimer = setTimeout(() => {
     fetchCherry().catch((err) => setStatus(`오류: ${err.message}`));
-  }, 700);
+  }, debounceMs);
 }
 
 function markerStyleByKind(kind) {
-  if (kind === "tree") return { radius: 5.5, stroke: "#b03a76", fill: "#ff8fc4" };
-  if (kind === "curated") return { radius: 7.5, stroke: "#962d66", fill: "#ff6fb2" };
-  if (kind === "internal") return { radius: 8, stroke: "#2f6a47", fill: "#6dcf98" };
-  if (kind === "community") return { radius: 7, stroke: "#a83871", fill: "#ff7fbb" };
-  return { radius: 7, stroke: "#ad3d75", fill: "#ff9bc9" };
+  const zoom = map.getZoom();
+  const radiusScale = zoom >= 13 ? 0.74 : 1;
+  if (kind === "tree") return { radius: 5.5 * radiusScale, stroke: "#b03a76", fill: "#ff8fc4" };
+  if (kind === "curated") return { radius: 7.5 * radiusScale, stroke: "#962d66", fill: "#ff6fb2" };
+  if (kind === "internal") return { radius: 8 * radiusScale, stroke: "#962d66", fill: "#ff6fb2" };
+  if (kind === "community") return { radius: 7 * radiusScale, stroke: "#962d66", fill: "#ff6fb2" };
+  return { radius: 7 * radiusScale, stroke: "#ad3d75", fill: "#ff9bc9" };
 }
 
 function shortLabelByKind(kind) {
@@ -416,6 +720,26 @@ function sourceLabelByKind(kind) {
   if (kind === "internal") return "내부 데이터베이스";
   if (kind === "community") return "커뮤니티 스팟";
   return "벚꽃 명소 (OSM)";
+}
+
+function isTypingTarget(target) {
+  if (!target || typeof target !== "object") return false;
+  if (target.isContentEditable) return true;
+  const tag = String(target.tagName || "").toUpperCase();
+  if (tag === "TEXTAREA") return true;
+  if (tag !== "INPUT") return false;
+  const type = String(target.type || "text").toLowerCase();
+  return !["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"].includes(type);
+}
+
+function applyKindShortcut(key) {
+  const nextKind = KIND_SHORTCUT_MAP[key];
+  if (!nextKind || !els.kindSelect) return false;
+  const hasOption = Array.from(els.kindSelect.options || []).some((opt) => opt.value === nextKind);
+  if (!hasOption) return false;
+  els.kindSelect.value = nextKind;
+  filterFeatures();
+  return true;
 }
 
 function applyLeftPanelState(collapsed) {
@@ -473,6 +797,9 @@ function initPanels() {
   if (els.closeAccountPanelBtn) els.closeAccountPanelBtn.onclick = () => setAccountPanelOpen(false);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") setAccountPanelOpen(false);
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+    if (isTypingTarget(event.target)) return;
+    if (applyKindShortcut(event.key)) event.preventDefault();
   });
   if (els.fabCompactToggle) {
     els.fabCompactToggle.onchange = () => {
@@ -586,6 +913,12 @@ async function saveSpot() {
 }
 
 async function saveAdminSpot() {
+  console.info("[admin_spot_ui] click_save", {
+    isAdminUser: isAdminUser(),
+    isAdminPickEnabled: isAdminPickEnabled(),
+    selectedCount: adminSelectedPoints.length,
+    spotName: String(els.adminSpotNameInput?.value || "").trim()
+  });
   if (!isAdminUser()) throw new Error("관리자 권한이 필요합니다.");
   if (!adminSelectedPoints.length) throw new Error("먼저 관리자 등록 좌표를 지도에서 클릭해 추가하세요.");
 
@@ -604,6 +937,12 @@ async function saveAdminSpot() {
     })
   });
   const json = await parseJsonSafe(res);
+  console.info("[admin_spot_ui] api_response", {
+    status: res.status,
+    ok: res.ok,
+    error: json?.error || null,
+    spotsCount: Array.isArray(json?.spots) ? json.spots.length : (json?.spot ? 1 : 0)
+  });
   if (!res.ok) handleApiErrorBody(json, "관리자 등록 실패");
   const savedSpots = Array.isArray(json.spots) ? json.spots : (json.spot ? [json.spot] : []);
 
@@ -747,13 +1086,14 @@ if (els.saveAdminSpotBtn) {
     try {
       await saveAdminSpot();
     } catch (error) {
+      console.error("[admin_spot_ui] save_failed", error);
       alert(error.message);
     }
   };
 }
 
 map.on("moveend", () => {
-  if (map.getZoom() < 8) return;
+  updateViewUrlParams();
   scheduleFetchCherry();
 });
 
@@ -794,6 +1134,7 @@ map.on("click", (event) => {
 
 (async function boot() {
   try {
+    updateViewUrlParams();
     initPanels();
     setSelectedSpotHint();
     setAdminSelectedSpotHint();

@@ -16,6 +16,7 @@ function createOsmHandler({
         bboxRaw: url.searchParams.get("bbox"),
         listCuratedCherrySpots: db.listCuratedCherrySpots,
         listInternalCherrySpots: db.listInternalCherrySpots,
+        listOsmCherrySpots: db.listOsmCherrySpots,
         listApprovedReports: db.listApprovedReports,
         getOverpassCacheEntry: db.getOverpassCacheEntry,
         upsertOverpassCacheEntry: db.upsertOverpassCacheEntry,
@@ -30,15 +31,19 @@ function createOsmHandler({
         }
       });
       if (overpassLogOptions?.enabled && overpassLogOptions?.detail) {
+        const elapsed = Date.now() - startAt;
+        const completedAt = new Date().toISOString();
         console.info(
-          `[overpass][${requestId}] api_complete status=200 elapsed_ms=${Date.now() - startAt} total=${result.meta?.total ?? 0}`
+          `[overpass][${requestId}] api_complete status=200 elapsed_ms=${elapsed} completed_at=${completedAt} raw_total=${result.meta?.rawTotal ?? 0} deduped=${result.meta?.deduped ?? 0} total=${result.meta?.total ?? 0} source=${result.meta?.overpassSource || ""}`
         );
       }
       return sendJson(res, 200, result);
     } catch (error) {
       if (overpassLogOptions?.enabled) {
+        const elapsed = Date.now() - startAt;
+        const completedAt = new Date().toISOString();
         console.error(
-          `[overpass][${requestId}] api_error status=500 elapsed_ms=${Date.now() - startAt} message=${error.message}`
+          `[overpass][${requestId}] api_error status=500 elapsed_ms=${elapsed} completed_at=${completedAt} message=${error.message}`
         );
       }
       return sendJson(res, 500, { error: "osm_proxy_error", message: error.message });

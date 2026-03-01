@@ -61,7 +61,7 @@
 
   <aside id="rightPanel" class="right panel">
     <div class="panel-header">
-      <strong>계정/저장</strong>
+      <strong id="rightPanelTitle">계정/저장</strong>
       <button id="closeAccountPanelBtn" class="icon-btn" aria-label="계정/저장 패널 닫기">✕</button>
     </div>
     <div class="panel-content">
@@ -86,9 +86,9 @@
         </div>
       </section>
 
-      <section class="box save">
-        <h3>선택 지점 저장</h3>
-        <label class="toggle-line">
+      <section id="saveSpotBox" class="box save">
+        <h3 id="saveSpotTitle">선택 지점 저장</h3>
+        <label id="mapPickToggleLine" class="toggle-line">
           <input id="enableMapPickToggle" type="checkbox" />
           <span>지도 클릭으로 위치 선택 활성화</span>
         </label>
@@ -116,7 +116,7 @@
         <div id="savedSpotList" class="list"></div>
       </section>
 
-      <section class="box prefs">
+      <section id="prefsBox" class="box prefs">
         <h3>표시 설정</h3>
         <label class="toggle-line">
           <input id="fabAutoToggle" type="checkbox" />

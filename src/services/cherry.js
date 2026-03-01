@@ -2,6 +2,7 @@ const {
   buildKoreaAreaQuery,
   buildBboxQuery,
   parseBbox,
+  getBboxArea,
   bboxToRoundedKey,
   isInsideBbox,
   dedupeElements,
@@ -86,6 +87,12 @@ function getSnapshotGeneratedAt(snapshot) {
   return value;
 }
 
+function getMaxBboxArea(overpassCacheOptions) {
+  const value = Number(overpassCacheOptions?.maxBboxArea);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+}
+
 async function revalidateCacheEntry({
   cacheKey,
   query,
@@ -96,8 +103,15 @@ async function revalidateCacheEntry({
   logContext
 }) {
   if (refreshInFlight.has(cacheKey)) {
+    const joinStartedAt = Date.now();
     logOverpass(logContext, "revalidate_join", { cache_key: cacheKey });
-    return refreshInFlight.get(cacheKey);
+    const joinedEntry = await refreshInFlight.get(cacheKey);
+    logOverpass(logContext, "revalidate_join_complete", {
+      cache_key: cacheKey,
+      wait_ms: Date.now() - joinStartedAt,
+      elements: (joinedEntry?.elements || []).length
+    });
+    return joinedEntry;
   }
   const task = (async () => {
     try {
@@ -143,6 +157,7 @@ async function loadCherryElements({
   bboxRaw,
   listCuratedCherrySpots,
   listInternalCherrySpots,
+  listOsmCherrySpots,
   listApprovedReports,
   getOverpassCacheEntry,
   upsertOverpassCacheEntry,
@@ -155,6 +170,9 @@ async function loadCherryElements({
   const startedAt = Date.now();
   const hasBbox = Boolean(bboxRaw);
   const bbox = hasBbox ? parseBbox(bboxRaw) : null;
+  const maxBboxArea = getMaxBboxArea(overpassCacheOptions);
+  const bboxArea = hasBbox ? getBboxArea(bbox) : 0;
+  const skipOverpassForLargeBbox = Boolean(hasBbox && maxBboxArea > 0 && bboxArea > maxBboxArea);
   const query = hasBbox ? buildBboxQuery(bbox) : buildKoreaAreaQuery();
   const bboxKeyPrecision = overpassCacheOptions?.bboxKeyPrecision;
   const roundedKey = hasBbox ? bboxToRoundedKey(bbox, bboxKeyPrecision) : "korea";
@@ -184,12 +202,29 @@ async function loadCherryElements({
     };
   }
 
-  const cachedEntry = await getOverpassCacheEntry(roundedKey);
+  const osmDbSpots = asArray(await listOsmCherrySpots({ bbox, status: "active" }));
+  const osmDbElements = osmDbSpots
+    .map((spot) => ({
+      type: "node",
+      id: `osmdb-${spot.osmKey}`,
+      lat: spot.lat,
+      lon: spot.lon,
+      tags: {
+        ...(spot.tags || {}),
+        name: spot.name || spot.tags?.name || "",
+        source: "osm_db",
+        "cherry:type": "osm_db"
+      }
+    }))
+    .filter((el) => Number.isFinite(el.lat) && Number.isFinite(el.lon));
+
+  const cachedEntry = skipOverpassForLargeBbox ? null : await getOverpassCacheEntry(roundedKey);
   let overpassData;
+  let overpassSource = "network";
   const expiresAt = cachedEntry?.expiresAt || 0;
   const staleUntil = getStaleUntil(cachedEntry, staleTtlMs);
   const freshCache = cachedEntry && typeof expiresAt === "number" && expiresAt > now;
-  const staleCache = cachedEntry && typeof staleUntil === "number" && staleUntil > now;
+  const staleCache = cachedEntry && !freshCache && typeof staleUntil === "number" && staleUntil > now;
 
   logOverpass(logContext, "request_start", {
     mode: hasBbox ? "bbox" : "korea",
@@ -198,10 +233,35 @@ async function loadCherryElements({
     query_bytes: query.length,
     cache_hit: Boolean(cachedEntry),
     fresh_cache: Boolean(freshCache),
-    stale_cache: Boolean(staleCache)
+    stale_cache: Boolean(staleCache),
+    osm_db_count: osmDbElements.length
   });
 
-  if (freshCache) {
+  if (osmDbElements.length > 0) {
+    overpassSource = "osm_db_short_circuit";
+    overpassData = {
+      elements: osmDbElements,
+      cached: true,
+      stale: false,
+      revalidating: false,
+      error: null
+    };
+  } else if (skipOverpassForLargeBbox) {
+    overpassSource = "bbox_rejected";
+    logOverpass(logContext, "bbox_rejected", {
+      cache_key: roundedKey,
+      bbox_area: bboxArea,
+      max_bbox_area: maxBboxArea
+    });
+    overpassData = {
+      elements: [],
+      cached: true,
+      stale: false,
+      revalidating: false,
+      error: "bbox_too_large"
+    };
+  } else if (freshCache) {
+    overpassSource = "cache_fresh";
     logOverpass(logContext, "cache_fresh_hit", {
       cache_key: roundedKey,
       elements: (cachedEntry?.elements || []).length,
@@ -209,6 +269,7 @@ async function loadCherryElements({
     });
     overpassData = { elements: cachedEntry.elements || [], cached: true, stale: false, revalidating: false, error: null };
   } else if (staleCache) {
+    overpassSource = "cache_stale_revalidate";
     logOverpass(logContext, "cache_stale_hit", {
       cache_key: roundedKey,
       elements: (cachedEntry?.elements || []).length,
@@ -226,6 +287,7 @@ async function loadCherryElements({
     }).catch(() => {});
   } else {
     try {
+      overpassSource = "network_revalidate";
       logOverpass(logContext, "cache_miss", { cache_key: roundedKey });
       const nextEntry = await revalidateCacheEntry({
         cacheKey: roundedKey,
@@ -238,6 +300,7 @@ async function loadCherryElements({
       });
       overpassData = { elements: nextEntry.elements || [], cached: false, stale: false, revalidating: false, error: null };
     } catch (error) {
+      overpassSource = "network_error";
       if (cachedEntry) {
         overpassData = {
           elements: cachedEntry.elements || [],
@@ -294,12 +357,14 @@ async function loadCherryElements({
       }
     }));
 
-  const merged = dedupeElements([
+  const mergedInput = [
     ...(overpassData.elements || []),
     ...curatedElements,
     ...internalElements,
     ...communityElements
-  ]);
+  ];
+  const merged = dedupeElements(mergedInput);
+  const dedupedCount = Math.max(0, mergedInput.length - merged.length);
 
   const result = {
     elements: merged,
@@ -308,10 +373,13 @@ async function loadCherryElements({
       curated: curatedElements.length,
       internal: internalElements.length,
       community: communityElements.length,
+      rawTotal: mergedInput.length,
+      deduped: dedupedCount,
       total: merged.length,
       cached: overpassData.cached,
       stale: overpassData.stale,
       revalidating: overpassData.revalidating,
+      overpassSource,
       overpassError: overpassData.error || null,
       snapshotCached: false
     }
@@ -323,7 +391,10 @@ async function loadCherryElements({
   if (shouldWriteSnapshot && !shouldSkipSnapshotOnOverpassFailure) {
     logOverpass(logContext, "snapshot_upsert", {
       cache_key: roundedKey,
-      reason: !existingSnapshot ? "first_write" : (overpassData.stale ? "stale_refresh" : "cache_miss_refresh")
+      reason: !existingSnapshot ? "first_write" : (overpassData.stale ? "stale_refresh" : "cache_miss_refresh"),
+      raw_total: result.meta.rawTotal,
+      deduped: result.meta.deduped,
+      total: result.meta.total
     });
     await upsertPlaceSnapshot({
       key: roundedKey,
@@ -340,17 +411,22 @@ async function loadCherryElements({
     });
   }
 
+  const completedAt = new Date().toISOString();
   logOverpass(logContext, "request_complete", {
     cache_key: roundedKey,
     elapsed_ms: Date.now() - startedAt,
+    completed_at: completedAt,
     overpass: result.meta.overpass,
     curated: result.meta.curated,
     internal: result.meta.internal,
     community: result.meta.community,
+    raw_total: result.meta.rawTotal,
+    deduped: result.meta.deduped,
     total: result.meta.total,
     cached: result.meta.cached,
     stale: result.meta.stale,
     revalidating: result.meta.revalidating,
+    overpass_source: result.meta.overpassSource,
     overpass_error: result.meta.overpassError || ""
   });
 

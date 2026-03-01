@@ -50,6 +50,13 @@ function parseBbox(raw) {
   return { minLon, minLat, maxLon, maxLat };
 }
 
+function getBboxArea(bbox) {
+  if (!bbox) return 0;
+  const lonSpan = Math.max(0, bbox.maxLon - bbox.minLon);
+  const latSpan = Math.max(0, bbox.maxLat - bbox.minLat);
+  return lonSpan * latSpan;
+}
+
 function bboxToRoundedKey(bbox, precision = 2) {
   const digits = Number.isInteger(precision) ? Math.max(0, Math.min(precision, 6)) : 2;
   return [
@@ -101,50 +108,102 @@ async function fetchOverpass({ query, endpoints, logContext }) {
   const body = new URLSearchParams({ data: query });
   let lastError = null;
 
-  for (let i = 0; i < endpoints.length; i += 1) {
-    const endpoint = endpoints[i];
-    const attemptStart = Date.now();
-    try {
-      logOverpass(logContext, "endpoint_try", {
-        attempt: i + 1,
-        total: endpoints.length,
-        endpoint
-      });
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
-        body,
-        signal: AbortSignal.timeout(15000)
-      });
-      if (!response.ok) throw new Error(`overpass_failed_${response.status}`);
-      const data = await response.json();
-      const elements = data.elements || [];
-      logOverpass(logContext, "endpoint_success", {
-        attempt: i + 1,
-        endpoint,
-        status: response.status,
-        elapsed_ms: Date.now() - attemptStart,
-        elements: elements.length
-      });
-      return { elements };
-    } catch (error) {
-      lastError = error;
-      logOverpass(logContext, "endpoint_error", {
-        attempt: i + 1,
-        endpoint,
-        elapsed_ms: Date.now() - attemptStart,
-        message: error.message || "unknown"
-      });
+  const waitMs = await acquireOverpassSlot(logContext);
+  if (waitMs > 0) {
+    logOverpass(logContext, "concurrency_wait_complete", {
+      wait_ms: waitMs,
+      inflight: overpassInFlight,
+      max_inflight: OVERPASS_MAX_INFLIGHT
+    });
+  }
+  try {
+    for (let i = 0; i < endpoints.length; i += 1) {
+      const endpoint = endpoints[i];
+      const attemptStart = Date.now();
+      try {
+        logOverpass(logContext, "endpoint_try", {
+          attempt: i + 1,
+          total: endpoints.length,
+          endpoint
+        });
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body,
+          signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) throw new Error(`overpass_failed_${response.status}`);
+        const data = await response.json();
+        const elements = data.elements || [];
+        logOverpass(logContext, "endpoint_success", {
+          attempt: i + 1,
+          endpoint,
+          status: response.status,
+          elapsed_ms: Date.now() - attemptStart,
+          elements: elements.length
+        });
+        return { elements };
+      } catch (error) {
+        lastError = error;
+        logOverpass(logContext, "endpoint_error", {
+          attempt: i + 1,
+          endpoint,
+          elapsed_ms: Date.now() - attemptStart,
+          error_name: error.name || "Error",
+          message: error.message || "unknown"
+        });
+      }
     }
+  } finally {
+    releaseOverpassSlot();
   }
 
   throw lastError || new Error("overpass_unavailable");
+}
+
+const OVERPASS_MAX_INFLIGHT = 2;
+let overpassInFlight = 0;
+const overpassWaiters = [];
+
+function acquireOverpassSlot(logContext) {
+  const waitStartedAt = Date.now();
+  if (overpassInFlight < OVERPASS_MAX_INFLIGHT) {
+    overpassInFlight += 1;
+    logOverpass(logContext, "concurrency_acquired", {
+      inflight: overpassInFlight,
+      max_inflight: OVERPASS_MAX_INFLIGHT
+    });
+    return Promise.resolve(0);
+  }
+  logOverpass(logContext, "concurrency_wait_start", {
+    inflight: overpassInFlight,
+    max_inflight: OVERPASS_MAX_INFLIGHT,
+    queue_depth: overpassWaiters.length + 1
+  });
+  return new Promise((resolve) => {
+    overpassWaiters.push(() => {
+      overpassInFlight += 1;
+      logOverpass(logContext, "concurrency_acquired", {
+        inflight: overpassInFlight,
+        max_inflight: OVERPASS_MAX_INFLIGHT,
+        queue_depth: overpassWaiters.length
+      });
+      resolve(Date.now() - waitStartedAt);
+    });
+  });
+}
+
+function releaseOverpassSlot() {
+  overpassInFlight = Math.max(0, overpassInFlight - 1);
+  const next = overpassWaiters.shift();
+  if (next) next();
 }
 
 module.exports = {
   buildKoreaAreaQuery,
   buildBboxQuery,
   parseBbox,
+  getBboxArea,
   bboxToRoundedKey,
   isInsideBbox,
   dedupeElements,

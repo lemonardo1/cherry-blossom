@@ -51,7 +51,7 @@ gcloud run deploy cherry-blossom-map \
 - Frontend: Vanilla JS + Leaflet (`/public`)
 - Backend: Node.js built-in HTTP server (entry: `/server.js`, modules: `/src`)
 - Storage: PostgreSQL + JSON seed files
-  - DB 테이블: `users`, `spots`, `reports`, `internal_cherry_spots`, `overpass_cache_entries`, `place_snapshots`
+  - DB 테이블: `users`, `spots`, `reports`, `internal_cherry_spots`, `osm_cherry_spots`, `overpass_cache_entries`, `place_snapshots`
   - 파일 입력(마이그레이션용): `/data/*.json`
   - 추천 데이터: `/data/cherry-curated.json`
 
@@ -72,7 +72,7 @@ gcloud run deploy cherry-blossom-map \
 ## Services
 
 - `src/services/cherry.js`
-  - 역할: OSM + 추천(`cherry-curated.json`) + 내부DB(`internal_cherry_spots`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
+  - 역할: 내부 OSM DB(`osm_cherry_spots`) + 추천(`cherry-curated.json`) + 내부DB(`internal_cherry_spots`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
   - 입력: `bboxRaw`, DB 접근 함수, 파일 경로, Overpass 엔드포인트 목록
   - 출력: `{ elements, meta }` (`overpass/curated/internal/community/total/cached/overpassError`)
   - 부가 동작: 조회 결과를 DB `place_snapshots`에 bbox 키별 스냅샷 저장
@@ -84,6 +84,8 @@ gcloud run deploy cherry-blossom-map \
 ## Serving Strategy
 
 - `/api/osm/cherry`는 자체 DB를 우선 사용해 서빙합니다.
+  - 1순위: DB `osm_cherry_spots` (사전 동기화된 OSM 데이터)
+  - 2순위(폴백): Overpass 조회 + `overpass_cache_entries`
   - Overpass 결과는 DB `overpass_cache_entries`에 bbox 키 단위로 저장
   - 머지 결과는 DB `place_snapshots`에 저장하고, 짧은 TTL 내 재조회 시 snapshot에서 즉시 응답
   - 캐시 정책: `stale-while-revalidate`
@@ -105,6 +107,7 @@ gcloud run deploy cherry-blossom-map \
     - `OVERPASS_TTL_KOREA_MS=1800000` (기본 30분)
     - `OVERPASS_STALE_TTL_KOREA_MS=604800000` (기본 7일)
     - `OVERPASS_SNAPSHOT_TTL_MS=60000` (기본 60초, `place_snapshots` 응답 캐시 TTL)
+    - `OVERPASS_MAX_BBOX_AREA=0.08` (기본 0.08, 이 값보다 큰 bbox는 Overpass 조회 생략)
   - 선택(Overpass 로그)
     - `OVERPASS_LOG_ENABLED=true` (기본 true)
     - `OVERPASS_LOG_DETAIL=true` (기본 true, false면 핵심 로그만)
@@ -122,6 +125,16 @@ npm run db:import:csv -- --file ./data/cherry-extra.csv --mode curated
 npm run db:import:csv -- --file ./data/cherry-extra.csv --mode internal
 npm run db:import:csv -- --file ./data/cherry-extra.csv --mode curated --dry-run true
 ```
+
+- OSM -> PostgreSQL 동기화(권장: 주기 실행)
+
+```bash
+npm run db:sync:osm
+npm run db:sync:osm -- --dry-run true
+```
+
+  - 동기화 후 `osm_cherry_spots`를 기준으로 `/api/osm/cherry`가 응답합니다.
+  - 주기 갱신은 OS cron/Cloud Scheduler 등 외부 스케줄러로 `npm run db:sync:osm` 실행을 권장합니다.
 
 - 개발 서버 실행
 

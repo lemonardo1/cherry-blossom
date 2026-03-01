@@ -62,6 +62,23 @@ function mapOverpassEntry(row) {
   };
 }
 
+function mapOsmCherrySpot(row) {
+  if (!row) return null;
+  return {
+    osmKey: row.osm_key,
+    osmType: row.osm_type,
+    osmId: row.osm_id,
+    name: row.name || "",
+    lat: Number(row.lat),
+    lon: Number(row.lon),
+    tags: row.tags && typeof row.tags === "object" ? row.tags : {},
+    status: row.status || "active",
+    firstSeenAt: toIso(row.first_seen_at),
+    lastSeenAt: toIso(row.last_seen_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
 function mapSnapshot(row) {
   if (!row) return null;
   return {
@@ -169,6 +186,27 @@ async function initSchema() {
       stale_until BIGINT NOT NULL,
       elements JSONB NOT NULL DEFAULT '[]'::jsonb
     )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS osm_cherry_spots (
+      osm_key TEXT PRIMARY KEY,
+      osm_type TEXT NOT NULL CHECK (osm_type IN ('node', 'way', 'relation')),
+      osm_id TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      lat DOUBLE PRECISION NOT NULL,
+      lon DOUBLE PRECISION NOT NULL,
+      tags JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      first_seen_at TIMESTAMPTZ NOT NULL,
+      last_seen_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS osm_cherry_spots_status_idx ON osm_cherry_spots(status)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS osm_cherry_spots_lat_lon_idx ON osm_cherry_spots(lat, lon)
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS place_snapshots (
@@ -407,6 +445,100 @@ async function upsertOverpassCacheEntry(entry) {
   );
 }
 
+async function listOsmCherrySpots({ bbox, status = "active" } = {}) {
+  const values = [];
+  const where = [];
+  if (status && status !== "all") {
+    values.push(status);
+    where.push(`status = $${values.length}`);
+  }
+  if (bbox && typeof bbox === "object") {
+    values.push(Number(bbox.minLat));
+    where.push(`lat >= $${values.length}`);
+    values.push(Number(bbox.maxLat));
+    where.push(`lat <= $${values.length}`);
+    values.push(Number(bbox.minLon));
+    where.push(`lon >= $${values.length}`);
+    values.push(Number(bbox.maxLon));
+    where.push(`lon <= $${values.length}`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT osm_key, osm_type, osm_id, name, lat, lon, tags, status, first_seen_at, last_seen_at, updated_at
+     FROM osm_cherry_spots
+     ${whereSql}
+     ORDER BY updated_at DESC`,
+    values
+  );
+  return rows.map(mapOsmCherrySpot);
+}
+
+async function upsertOsmCherrySpots(spots, { syncedAt, deactivateMissing = true } = {}) {
+  if (!Array.isArray(spots) || spots.length === 0) return { upserted: 0, deactivated: 0 };
+  const runAt = syncedAt || new Date().toISOString();
+  const seenKeys = new Set();
+  const client = await pool.connect();
+  let deactivated = 0;
+  try {
+    await client.query("BEGIN");
+    for (const spot of spots) {
+      const osmType = String(spot.osmType || "").trim();
+      const osmId = String(spot.osmId || "").trim();
+      const osmKey = String(spot.osmKey || `${osmType}/${osmId}`).trim();
+      if (!osmKey || !osmType || !osmId) continue;
+      seenKeys.add(osmKey);
+      await client.query(
+        `INSERT INTO osm_cherry_spots (
+          osm_key, osm_type, osm_id, name, lat, lon, tags, status, first_seen_at, last_seen_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'active', $8, $8, $8)
+        ON CONFLICT (osm_key)
+        DO UPDATE SET
+          osm_type = EXCLUDED.osm_type,
+          osm_id = EXCLUDED.osm_id,
+          name = EXCLUDED.name,
+          lat = EXCLUDED.lat,
+          lon = EXCLUDED.lon,
+          tags = EXCLUDED.tags,
+          status = 'active',
+          last_seen_at = EXCLUDED.last_seen_at,
+          updated_at = EXCLUDED.updated_at`,
+        [
+          osmKey,
+          osmType,
+          osmId,
+          String(spot.name || "").trim(),
+          Number(spot.lat),
+          Number(spot.lon),
+          JSON.stringify(spot.tags || {}),
+          runAt
+        ]
+      );
+    }
+    if (deactivateMissing) {
+      const keys = Array.from(seenKeys);
+      const values = [runAt];
+      let query = `
+        UPDATE osm_cherry_spots
+        SET status = 'inactive', updated_at = $1
+        WHERE status = 'active'
+      `;
+      if (keys.length) {
+        values.push(keys);
+        query += ` AND NOT (osm_key = ANY($2::text[]))`;
+      }
+      const result = await client.query(query, values);
+      deactivated = Number(result.rowCount || 0);
+    }
+    await client.query("COMMIT");
+    return { upserted: seenKeys.size, deactivated };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getPlaceSnapshot(cacheKey) {
   const { rows } = await pool.query(
     `SELECT cache_key, bbox, generated_at, elements, meta
@@ -613,6 +745,8 @@ module.exports = {
   listApprovedReports,
   getOverpassCacheEntry,
   upsertOverpassCacheEntry,
+  listOsmCherrySpots,
+  upsertOsmCherrySpots,
   getPlaceSnapshot,
   upsertPlaceSnapshot,
   listInternalCherrySpots,
