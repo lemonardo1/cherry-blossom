@@ -14,14 +14,19 @@ function isValidCoord(lat, lon) {
 
 function parseSpotInput(body) {
   const name = String(body.name || "").trim();
-  const lat = Number(body.lat);
-  const lon = Number(body.lon);
   const region = String(body.region || "").trim().slice(0, 100);
   const memo = String(body.memo || "").trim().slice(0, 400);
   const statusRaw = String(body.status || "active").trim().toLowerCase();
   const status = statusRaw === "inactive" ? "inactive" : "active";
-  if (!name || !isValidCoord(lat, lon)) return null;
-  return { name, lat, lon, region, memo, status };
+  const rawPoints = Array.isArray(body.points) ? body.points : [{ lat: body.lat, lon: body.lon }];
+  const points = rawPoints
+    .map((point) => ({
+      lat: Number(point?.lat),
+      lon: Number(point?.lon)
+    }))
+    .filter((point) => isValidCoord(point.lat, point.lon));
+  if (!name || !points.length) return null;
+  return { name, region, memo, status, points };
 }
 
 function createAdminCherrySpotsHandler({
@@ -34,6 +39,7 @@ function createAdminCherrySpotsHandler({
     const user = await authUser(req);
     if (!user) return sendJson(res, 401, { error: "auth_required" });
     if (user.role !== "admin") return sendJson(res, 403, { error: "admin_required" });
+    console.info(`[admin_spot] method=${req.method} path=${url.pathname} user_id=${user.id}`);
 
     if (req.method === "GET" && url.pathname === "/api/admin/cherry-spots") {
       const status = String(url.searchParams.get("status") || "all").trim();
@@ -51,15 +57,26 @@ function createAdminCherrySpotsHandler({
       const parsed = parseSpotInput(body);
       if (!parsed) return sendJson(res, 400, { error: "invalid_input" });
       const now = new Date().toISOString();
-      const spot = await db.createInternalCherrySpot({
+      const spotsToCreate = parsed.points.map((point) => ({
         id: makeId(),
-        ...parsed,
+        name: parsed.name,
+        lat: point.lat,
+        lon: point.lon,
+        region: parsed.region,
+        memo: parsed.memo,
+        status: parsed.status,
         createdBy: user.id,
         createdAt: now,
         updatedAt: now
-      });
+      }));
+      const spots = spotsToCreate.length === 1
+        ? [await db.createInternalCherrySpot(spotsToCreate[0])]
+        : await db.createInternalCherrySpots(spotsToCreate);
       await db.clearGeoCache();
-      return sendJson(res, 201, { spot });
+      console.info(
+        `[admin_spot] created count=${spots.length} name=${parsed.name} created_by=${user.id}`
+      );
+      return sendJson(res, 201, { spot: spots[0], spots });
     }
 
     if (req.method === "PATCH" && url.pathname.startsWith("/api/admin/cherry-spots/")) {

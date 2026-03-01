@@ -476,6 +476,40 @@ async function createInternalCherrySpot(spot) {
   return spot;
 }
 
+async function createInternalCherrySpots(spots) {
+  if (!Array.isArray(spots) || !spots.length) return [];
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const spot of spots) {
+      await client.query(
+        `INSERT INTO internal_cherry_spots (
+          id, name, lat, lon, region, memo, status, created_by, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          spot.id,
+          spot.name,
+          spot.lat,
+          spot.lon,
+          spot.region || "",
+          spot.memo || "",
+          spot.status || "active",
+          spot.createdBy || null,
+          spot.createdAt,
+          spot.updatedAt
+        ]
+      );
+    }
+    await client.query("COMMIT");
+    return spots;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function updateInternalCherrySpotById(spot) {
   const { rows } = await pool.query(
     `UPDATE internal_cherry_spots
@@ -583,6 +617,7 @@ module.exports = {
   upsertPlaceSnapshot,
   listInternalCherrySpots,
   createInternalCherrySpot,
+  createInternalCherrySpots,
   updateInternalCherrySpotById,
   setInternalCherrySpotStatusById,
   listCuratedCherrySpots,
