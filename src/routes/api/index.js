@@ -9,19 +9,23 @@ const { handleHealth } = require("./health");
 function createApiHandler({
   usersFile,
   spotsFile,
-  curatedFile,
   reportsFile,
   overpassEndpoints,
+  overpassCacheOptions,
   db
 }) {
-  const sessions = new Map();
-
   async function authUser(req) {
     const cookies = parseCookies(req);
     const token = cookies.session;
-    if (!token || !sessions.has(token)) return null;
-    const userId = sessions.get(token);
-    return db.getUserById(userId);
+    if (!token) return null;
+    const session = await db.getSessionByToken(token);
+    if (!session) return null;
+    const expiresAtMs = Date.parse(session.expiresAt || "");
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      await db.deleteSessionByToken(token);
+      return null;
+    }
+    return db.getUserById(session.userId);
   }
 
   async function readJson(resource, opts = {}) {
@@ -68,7 +72,7 @@ function createApiHandler({
       usersFile,
       readJson,
       writeJson,
-      sessions,
+      db,
       authUser,
       hasAdminUser: db.hasAdminUser
     }),
@@ -76,9 +80,9 @@ function createApiHandler({
     createReportsHandler({ reportsFile, readJson, writeJson, authUser }),
     createAdminCherrySpotsHandler({ authUser, db }),
     createOsmHandler({
-      curatedFile,
       db,
-      overpassEndpoints
+      overpassEndpoints,
+      overpassCacheOptions
     })
   ];
 

@@ -97,6 +97,12 @@ gcloud run deploy cherry-blossom-map \
 
 - 환경 변수 설정
   - `DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<db>`
+  - 선택(Overpass 캐시 튜닝)
+    - `OVERPASS_BBOX_KEY_PRECISION=2` (0~6, 기본 2)
+    - `OVERPASS_TTL_BBOX_MS=300000` (기본 5분)
+    - `OVERPASS_STALE_TTL_BBOX_MS=86400000` (기본 24시간)
+    - `OVERPASS_TTL_KOREA_MS=1800000` (기본 30분)
+    - `OVERPASS_STALE_TTL_KOREA_MS=604800000` (기본 7일)
 - JSON -> PostgreSQL 마이그레이션
 
 ```bash
@@ -135,6 +141,6 @@ npm run dev
 
 ## Next Upgrade
 
-- 세션 메모리 저장 -> Redis 세션/JWT 전환
+- 세션 저장소(PostgreSQL) -> Redis 세션/JWT 전환
 - 사용자 권한/프로필 고도화
 - Overpass 캐시를 Redis 기반으로 확장

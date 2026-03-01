@@ -1,4 +1,3 @@
-const fs = require("node:fs/promises");
 const {
   buildKoreaAreaQuery,
   buildBboxQuery,
@@ -30,16 +29,25 @@ function asArray(raw) {
   return Array.isArray(raw) ? raw : [];
 }
 
-async function readJsonArray(file) {
-  const text = await fs.readFile(file, "utf8");
-  const parsed = JSON.parse(text);
-  return asArray(parsed);
-}
-
 function getTtlPolicy(hasBbox) {
   return hasBbox
     ? { ttlMs: 5 * 60 * 1000, staleTtlMs: 24 * 60 * 60 * 1000 }
     : { ttlMs: 30 * 60 * 1000, staleTtlMs: 7 * 24 * 60 * 60 * 1000 };
+}
+
+function getOverpassCachePolicy(overpassCacheOptions, hasBbox) {
+  const fallback = getTtlPolicy(hasBbox);
+  if (!overpassCacheOptions || typeof overpassCacheOptions !== "object") return fallback;
+  if (hasBbox) {
+    return {
+      ttlMs: overpassCacheOptions.bboxTtlMs || fallback.ttlMs,
+      staleTtlMs: overpassCacheOptions.bboxStaleTtlMs || fallback.staleTtlMs
+    };
+  }
+  return {
+    ttlMs: overpassCacheOptions.koreaTtlMs || fallback.ttlMs,
+    staleTtlMs: overpassCacheOptions.koreaStaleTtlMs || fallback.staleTtlMs
+  };
 }
 
 function getStaleUntil(entry, staleTtlMs) {
@@ -82,20 +90,22 @@ async function revalidateCacheEntry({
 
 async function loadCherryElements({
   bboxRaw,
-  curatedFile,
+  listCuratedCherrySpots,
   listInternalCherrySpots,
   listApprovedReports,
   getOverpassCacheEntry,
   upsertOverpassCacheEntry,
   getPlaceSnapshot,
   upsertPlaceSnapshot,
-  overpassEndpoints
+  overpassEndpoints,
+  overpassCacheOptions
 }) {
   const hasBbox = Boolean(bboxRaw);
   const bbox = hasBbox ? parseBbox(bboxRaw) : null;
   const query = hasBbox ? buildBboxQuery(bbox) : buildKoreaAreaQuery();
-  const roundedKey = hasBbox ? bboxToRoundedKey(bbox) : "korea";
-  const { ttlMs, staleTtlMs } = getTtlPolicy(hasBbox);
+  const bboxKeyPrecision = overpassCacheOptions?.bboxKeyPrecision;
+  const roundedKey = hasBbox ? bboxToRoundedKey(bbox, bboxKeyPrecision) : "korea";
+  const { ttlMs, staleTtlMs } = getOverpassCachePolicy(overpassCacheOptions, hasBbox);
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
@@ -150,7 +160,7 @@ async function loadCherryElements({
     }
   }
 
-  const curated = await readJsonArray(curatedFile);
+  const curated = asArray(await listCuratedCherrySpots());
   const reports = asArray(await listApprovedReports());
   const internalSpots = asArray(await listInternalCherrySpots({ status: "active" }));
   const curatedElements = curated

@@ -2,23 +2,24 @@ const { sendJson } = require("../../lib/http");
 const { loadCherryElements } = require("../../services/cherry");
 
 function createOsmHandler({
-  curatedFile,
   db,
-  overpassEndpoints
+  overpassEndpoints,
+  overpassCacheOptions
 }) {
   return async function handleOsm(req, res, url) {
     if (req.method !== "GET" || url.pathname !== "/api/osm/cherry") return false;
     try {
       const result = await loadCherryElements({
         bboxRaw: url.searchParams.get("bbox"),
-        curatedFile,
+        listCuratedCherrySpots: db.listCuratedCherrySpots,
         listInternalCherrySpots: db.listInternalCherrySpots,
         listApprovedReports: db.listApprovedReports,
         getOverpassCacheEntry: db.getOverpassCacheEntry,
         upsertOverpassCacheEntry: db.upsertOverpassCacheEntry,
         getPlaceSnapshot: db.getPlaceSnapshot,
         upsertPlaceSnapshot: db.upsertPlaceSnapshot,
-        overpassEndpoints
+        overpassEndpoints,
+        overpassCacheOptions
       });
       return sendJson(res, 200, result);
     } catch (error) {

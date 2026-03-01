@@ -4,11 +4,12 @@ const {
   hashPassword,
   verifyPassword,
   sanitizeUser,
+  SESSION_MAX_AGE_SECONDS,
   setSessionCookie,
   clearSessionCookie
 } = require("../../lib/auth");
 
-function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser, hasAdminUser }) {
+function createAuthHandler({ usersFile, readJson, writeJson, db, authUser, hasAdminUser }) {
   return async function handleAuth(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/auth/register") {
       let body;
@@ -41,7 +42,13 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser,
       await writeJson(usersFile, user);
 
       const token = makeId();
-      sessions.set(token, user.id);
+      const nowMs = Date.now();
+      await db.createSession({
+        token,
+        userId: user.id,
+        createdAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + SESSION_MAX_AGE_SECONDS * 1000).toISOString()
+      });
       setSessionCookie(res, token);
       return sendJson(res, 201, { user: sanitizeUser(user) });
     }
@@ -62,14 +69,20 @@ function createAuthHandler({ usersFile, readJson, writeJson, sessions, authUser,
       }
 
       const token = makeId();
-      sessions.set(token, user.id);
+      const nowMs = Date.now();
+      await db.createSession({
+        token,
+        userId: user.id,
+        createdAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + SESSION_MAX_AGE_SECONDS * 1000).toISOString()
+      });
       setSessionCookie(res, token);
       return sendJson(res, 200, { user: sanitizeUser(user) });
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       const cookies = parseCookies(req);
-      if (cookies.session) sessions.delete(cookies.session);
+      if (cookies.session) await db.deleteSessionByToken(cookies.session);
       clearSessionCookie(res);
       return sendJson(res, 200, { ok: true });
     }

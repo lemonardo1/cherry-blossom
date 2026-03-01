@@ -4,6 +4,20 @@ const ROOT = path.join(__dirname, "..");
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parsePrecision(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed < 0) return 0;
+  if (parsed > 6) return 6;
+  return parsed;
+}
+
 module.exports = {
   PORT: process.env.PORT || 3000,
   HOST: process.env.HOST || "0.0.0.0",
@@ -19,5 +33,10 @@ module.exports = {
   OVERPASS_ENDPOINTS: [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter"
-  ]
+  ],
+  OVERPASS_BBOX_KEY_PRECISION: parsePrecision(process.env.OVERPASS_BBOX_KEY_PRECISION, 2),
+  OVERPASS_TTL_BBOX_MS: parsePositiveInt(process.env.OVERPASS_TTL_BBOX_MS, 5 * 60 * 1000),
+  OVERPASS_STALE_TTL_BBOX_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_BBOX_MS, 24 * 60 * 60 * 1000),
+  OVERPASS_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_TTL_KOREA_MS, 30 * 60 * 1000),
+  OVERPASS_STALE_TTL_KOREA_MS: parsePositiveInt(process.env.OVERPASS_STALE_TTL_KOREA_MS, 7 * 24 * 60 * 60 * 1000)
 };

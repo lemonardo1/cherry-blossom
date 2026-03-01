@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 function makeId() {
   return crypto.randomBytes(12).toString("hex");
@@ -22,7 +23,7 @@ function sanitizeUser(user) {
 }
 
 function setSessionCookie(res, token) {
-  const cookie = `session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 7}`;
+  const cookie = `session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}`;
   res.setHeader("Set-Cookie", cookie);
 }
 
@@ -35,6 +36,7 @@ module.exports = {
   hashPassword,
   verifyPassword,
   sanitizeUser,
+  SESSION_MAX_AGE_SECONDS,
   setSessionCookie,
   clearSessionCookie
 };

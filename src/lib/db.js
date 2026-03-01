@@ -89,6 +89,30 @@ function mapInternalCherrySpot(row) {
   };
 }
 
+function mapSession(row) {
+  if (!row) return null;
+  return {
+    token: row.token,
+    userId: row.user_id,
+    createdAt: toIso(row.created_at),
+    expiresAt: toIso(row.expires_at)
+  };
+}
+
+function mapCuratedCherrySpot(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    lat: Number(row.lat),
+    lon: Number(row.lon),
+    region: row.region || "",
+    memo: row.memo || "",
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
 async function initSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -169,6 +193,32 @@ async function initSchema() {
       updated_at TIMESTAMPTZ NOT NULL
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS curated_cherry_spots (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      lat DOUBLE PRECISION NOT NULL,
+      lon DOUBLE PRECISION NOT NULL,
+      region TEXT NOT NULL DEFAULT '',
+      memo TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id)
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at)
+  `);
 }
 
 async function getUserById(id) {
@@ -201,6 +251,35 @@ async function hasAdminUser() {
     "SELECT 1 FROM users WHERE role = 'admin' LIMIT 1"
   );
   return rows.length > 0;
+}
+
+async function createSession(session) {
+  await pool.query(
+    `INSERT INTO sessions (token, user_id, created_at, expires_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (token)
+     DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       created_at = EXCLUDED.created_at,
+       expires_at = EXCLUDED.expires_at`,
+    [session.token, session.userId, session.createdAt, session.expiresAt]
+  );
+  return session;
+}
+
+async function getSessionByToken(token) {
+  const { rows } = await pool.query(
+    `SELECT token, user_id, created_at, expires_at
+     FROM sessions
+     WHERE token = $1
+     LIMIT 1`,
+    [token]
+  );
+  return mapSession(rows[0]);
+}
+
+async function deleteSessionByToken(token) {
+  await pool.query("DELETE FROM sessions WHERE token = $1", [token]);
 }
 
 async function listSpots({ userId, mine }) {
@@ -439,6 +518,43 @@ async function clearGeoCache() {
   await pool.query("DELETE FROM place_snapshots");
 }
 
+async function listCuratedCherrySpots() {
+  const { rows } = await pool.query(
+    `SELECT id, name, lat, lon, region, memo, created_at, updated_at
+     FROM curated_cherry_spots
+     ORDER BY updated_at DESC`
+  );
+  return rows.map(mapCuratedCherrySpot);
+}
+
+async function upsertCuratedCherrySpot(spot) {
+  const now = new Date().toISOString();
+  await pool.query(
+    `INSERT INTO curated_cherry_spots (
+      id, name, lat, lon, region, memo, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id)
+     DO UPDATE SET
+       name = EXCLUDED.name,
+       lat = EXCLUDED.lat,
+       lon = EXCLUDED.lon,
+       region = EXCLUDED.region,
+       memo = EXCLUDED.memo,
+       created_at = EXCLUDED.created_at,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      spot.id,
+      spot.name,
+      spot.lat,
+      spot.lon,
+      spot.region || "",
+      spot.memo || "",
+      spot.createdAt || now,
+      spot.updatedAt || spot.createdAt || now
+    ]
+  );
+}
+
 async function closeDb() {
   await pool.end();
 }
@@ -450,6 +566,9 @@ module.exports = {
   getUserByEmail,
   createUser,
   hasAdminUser,
+  createSession,
+  getSessionByToken,
+  deleteSessionByToken,
   listSpots,
   createSpot,
   deleteSpotByIdForUser,
@@ -466,6 +585,8 @@ module.exports = {
   createInternalCherrySpot,
   updateInternalCherrySpotById,
   setInternalCherrySpotStatusById,
+  listCuratedCherrySpots,
+  upsertCuratedCherrySpot,
   clearGeoCache,
   closeDb
 };

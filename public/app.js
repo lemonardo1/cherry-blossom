@@ -403,6 +403,29 @@ async function authMe() {
   setAuthUI();
 }
 
+async function parseJsonSafe(res) {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
+function handleApiErrorBody(json, fallbackMessage) {
+  const errorCode = json?.error || "";
+  if (errorCode === "auth_required") {
+    user = null;
+    mySpotCount = 0;
+    setAuthUI();
+    updateAccountFabBadge();
+    throw new Error("세션이 만료되었습니다. 다시 로그인하세요.");
+  }
+  if (errorCode === "admin_required") {
+    throw new Error("관리자 권한이 필요합니다.");
+  }
+  throw new Error(errorCode || fallbackMessage);
+}
+
 async function login() {
   const email = els.emailInput.value.trim();
   const password = els.passwordInput.value;
@@ -455,6 +478,7 @@ async function saveSpot() {
   const res = await fetch("/api/spots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({
       name: selectedFeature.name,
       lat: selectedFeature.lat,
@@ -462,8 +486,8 @@ async function saveSpot() {
       memo
     })
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "저장 실패");
+  const json = await parseJsonSafe(res);
+  if (!res.ok) handleApiErrorBody(json, "저장 실패");
   els.memoInput.value = "";
   await loadMySpots();
 }
@@ -478,6 +502,7 @@ async function saveAdminSpot() {
   const res = await fetch("/api/admin/cherry-spots", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({
       name,
       lat: adminSelectedPoint.lat,
@@ -486,8 +511,8 @@ async function saveAdminSpot() {
       memo: els.adminSpotMemoInput.value.trim()
     })
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "관리자 등록 실패");
+  const json = await parseJsonSafe(res);
+  if (!res.ok) handleApiErrorBody(json, "관리자 등록 실패");
 
   els.adminSpotNameInput.value = "";
   els.adminSpotRegionInput.value = "";
@@ -499,15 +524,17 @@ async function saveAdminSpot() {
 }
 
 async function removeSpot(id) {
-  const res = await fetch(`/api/spots/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("삭제 실패");
+  const res = await fetch(`/api/spots/${id}`, { method: "DELETE", credentials: "same-origin" });
+  const json = await parseJsonSafe(res);
+  if (!res.ok) handleApiErrorBody(json, "삭제 실패");
   await loadMySpots();
 }
 
 async function loadMySpots() {
   if (!user) return;
-  const res = await fetch("/api/spots?mine=1");
-  const json = await res.json();
+  const res = await fetch("/api/spots?mine=1", { credentials: "same-origin" });
+  const json = await parseJsonSafe(res);
+  if (!res.ok) handleApiErrorBody(json, "내 스팟 조회 실패");
   const list = json.spots || [];
   mySpotCount = list.length;
   updateAccountFabBadge();

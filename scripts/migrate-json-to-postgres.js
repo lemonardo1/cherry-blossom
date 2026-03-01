@@ -178,6 +178,50 @@ async function importInternalCherrySpots(spots) {
   console.log(`[ok] internal cherry spots ${spots.length}건 upsert`);
 }
 
+async function importCuratedCherrySpots(spots) {
+  for (const spot of spots) {
+    const now = new Date().toISOString();
+    await db.pool.query(
+      `INSERT INTO curated_cherry_spots (
+        id, name, lat, lon, region, memo, created_at, updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id)
+       DO UPDATE SET
+         name = EXCLUDED.name,
+         lat = EXCLUDED.lat,
+         lon = EXCLUDED.lon,
+         region = EXCLUDED.region,
+         memo = EXCLUDED.memo,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        spot.id,
+        spot.name,
+        spot.lat,
+        spot.lon,
+        spot.region || "",
+        spot.memo || "",
+        spot.createdAt || now,
+        spot.updatedAt || spot.createdAt || now
+      ]
+    );
+  }
+  console.log(`[ok] curated cherry spots ${spots.length}건 upsert`);
+}
+
+async function deleteJsonFilesInDataDir() {
+  const entries = await fs.readdir(DATA_DIR, { withFileTypes: true });
+  const jsonFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+    .map((entry) => path.join(DATA_DIR, entry.name));
+
+  for (const filePath of jsonFiles) {
+    await fs.unlink(filePath);
+  }
+  console.log(`[ok] data 폴더 JSON 파일 ${jsonFiles.length}개 삭제`);
+}
+
 async function main() {
   await db.initSchema();
 
@@ -187,6 +231,7 @@ async function main() {
   const overpassCache = await readJsonOrDefault(path.join(DATA_DIR, "overpass-cache.json"), { entries: [] });
   const places = await readJsonOrDefault(path.join(DATA_DIR, "places.json"), { snapshots: {} });
   const internalSpots = await readJsonOrDefault(path.join(DATA_DIR, "internal-cherry-spots.json"), []);
+  const curatedSpots = await readJsonOrDefault(path.join(DATA_DIR, "cherry-curated.json"), []);
 
   await importUsers(Array.isArray(users) ? users : []);
   await importSpots(Array.isArray(spots) ? spots : []);
@@ -194,6 +239,8 @@ async function main() {
   await importOverpassEntries(overpassCache);
   await importPlaceSnapshots(places);
   await importInternalCherrySpots(Array.isArray(internalSpots) ? internalSpots : []);
+  await importCuratedCherrySpots(Array.isArray(curatedSpots) ? curatedSpots : []);
+  await deleteJsonFilesInDataDir();
 }
 
 main()

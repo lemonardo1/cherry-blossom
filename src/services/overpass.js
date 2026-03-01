@@ -50,12 +50,13 @@ function parseBbox(raw) {
   return { minLon, minLat, maxLon, maxLat };
 }
 
-function bboxToRoundedKey(bbox) {
+function bboxToRoundedKey(bbox, precision = 2) {
+  const digits = Number.isInteger(precision) ? Math.max(0, Math.min(precision, 6)) : 2;
   return [
-    bbox.minLon.toFixed(2),
-    bbox.minLat.toFixed(2),
-    bbox.maxLon.toFixed(2),
-    bbox.maxLat.toFixed(2)
+    bbox.minLon.toFixed(digits),
+    bbox.minLat.toFixed(digits),
+    bbox.maxLon.toFixed(digits),
+    bbox.maxLat.toFixed(digits)
   ].join(",");
 }
 
