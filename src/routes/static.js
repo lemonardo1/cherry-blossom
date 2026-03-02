@@ -68,8 +68,8 @@ function serveDynamicDiscovery(req, res, url) {
         { method: "GET", path: "/api/health", description: "Service health check" },
         {
           method: "GET",
-          path: "/api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat",
-          description: "Cherry points in map bounds"
+          path: "/api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat&zoom=12",
+          description: "Cherry points in map bounds (zoom-aware core hubs)"
         },
         { method: "GET", path: "/api/reports", description: "Approved community reports" }
       ],

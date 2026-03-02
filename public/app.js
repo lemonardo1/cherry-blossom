@@ -1,6 +1,24 @@
 const DEFAULT_VIEW = { lat: 37.52974, lng: 126.99886, zoom: 12 };
+const FIRST_VISIT_VIEW = { lat: 36.63096, lng: 128.04565, zoom: 8 };
+const FIRST_VISIT_STORAGE_KEY = "map:first-visit:done";
 const VIEW_URL_KEYS = { lat: "lat", lng: "lng", zoom: "z" };
 const MAX_MAP_ZOOM = 20;
+
+function hasCompletedFirstVisit() {
+  try {
+    return window.localStorage.getItem(FIRST_VISIT_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markFirstVisitDone() {
+  try {
+    window.localStorage.setItem(FIRST_VISIT_STORAGE_KEY, "1");
+  } catch {
+    // Ignore localStorage access errors (e.g. privacy mode)
+  }
+}
 
 function parseViewFromUrl() {
   const params = new URLSearchParams(window.location.search);
@@ -10,12 +28,22 @@ function parseViewFromUrl() {
   const hasLat = Number.isFinite(latRaw) && latRaw >= -90 && latRaw <= 90;
   const hasLng = Number.isFinite(lngRaw) && lngRaw >= -180 && lngRaw <= 180;
   const hasZoom = Number.isFinite(zoomRaw);
-  if (!hasLat || !hasLng || !hasZoom) return DEFAULT_VIEW;
-  return {
-    lat: latRaw,
-    lng: lngRaw,
-    zoom: Math.max(1, Math.min(MAX_MAP_ZOOM, zoomRaw))
-  };
+
+  if (hasLat && hasLng && hasZoom) {
+    markFirstVisitDone();
+    return {
+      lat: latRaw,
+      lng: lngRaw,
+      zoom: Math.max(1, Math.min(MAX_MAP_ZOOM, zoomRaw))
+    };
+  }
+
+  if (!hasCompletedFirstVisit()) {
+    markFirstVisitDone();
+    return FIRST_VISIT_VIEW;
+  }
+
+  return DEFAULT_VIEW;
 }
 
 function updateViewUrlParams() {
@@ -38,7 +66,6 @@ function updateViewUrlParams() {
   const nextUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ""}`;
   window.history.replaceState(null, "", nextUrl);
 }
-
 const initialView = parseViewFromUrl();
 const map = L.map("map", {
   zoomControl: false,
@@ -105,6 +132,8 @@ let selectedFeature = null;
 let lastMeta = null;
 let mySpotCount = 0;
 let fabAutoMode = true;
+const featureStore = new Map();
+const fetchedTileCache = new Map();
 const markerLayer = L.layerGroup().addTo(map);
 const manualPickLayer = L.layerGroup().addTo(map);
 const adminSelectedLayer = L.layerGroup().addTo(map);
@@ -116,9 +145,10 @@ let fetchCherryDebounceTimer = null;
 let activeCherryFetchController = null;
 let fetchCherrySeq = 0;
 let lastRequestedFetchPlanKey = "";
-const MIN_FETCH_ZOOM = 10;
+const MIN_FETCH_ZOOM = 12;
 const MAX_FETCH_BBOX_AREA = 0.08;
 const FETCH_BBOX_PRECISION = 3;
+const FETCH_TILE_KEY_PRECISION = 2;
 const HIGH_ZOOM_PREFETCH_MIN_ZOOM = 16;
 const PREFETCH_TILE_RADIUS = 1;
 const KIND_SHORTCUT_MAP = {
@@ -292,10 +322,27 @@ function normalizeUnique(elements) {
   return out;
 }
 
+function upsertFeatures(elements) {
+  const normalized = normalizeUnique(elements || []);
+  normalized.forEach((feature) => {
+    featureStore.set(feature.id, feature);
+  });
+  features = Array.from(featureStore.values());
+}
+
+function inCurrentBounds(feature, bounds) {
+  const lat = Number(feature?.lat);
+  const lon = Number(feature?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  return bounds.contains([lat, lon]);
+}
+
 function filterFeatures() {
   const q = els.searchInput.value.trim().toLowerCase();
   const kind = els.kindSelect.value;
+  const bounds = map.getBounds();
   filtered = features.filter((f) => {
+    if (!inCurrentBounds(f, bounds)) return false;
     const byText = !q || f.name.toLowerCase().includes(q);
     const byKind = kind === "all" || f.kind === kind;
     return byText && byKind;
@@ -477,6 +524,15 @@ function formatBbox({ minLon, minLat, maxLon, maxLat }) {
   ].join(",");
 }
 
+function formatBboxWithPrecision({ minLon, minLat, maxLon, maxLat }, precision) {
+  return [
+    minLon.toFixed(precision),
+    minLat.toFixed(precision),
+    maxLon.toFixed(precision),
+    maxLat.toFixed(precision)
+  ].join(",");
+}
+
 function clampLat(lat) {
   return Math.max(-85, Math.min(85, lat));
 }
@@ -512,8 +568,27 @@ function buildFetchBboxes(baseBbox, zoom) {
   return bboxes;
 }
 
-async function fetchCherryByBbox(bbox, signal) {
-  const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}`, { signal });
+function toTileKeyBbox(bbox, precision = FETCH_TILE_KEY_PRECISION) {
+  const parsed = parseBboxString(bbox);
+  if (!parsed) return bbox;
+  return formatBboxWithPrecision(parsed, precision);
+}
+
+function buildFetchTileBboxes(baseBbox, zoom) {
+  const rawBboxes = buildFetchBboxes(baseBbox, zoom);
+  const seen = new Set();
+  const out = [];
+  rawBboxes.forEach((bbox) => {
+    const key = toTileKeyBbox(bbox);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+  return out;
+}
+
+async function fetchCherryByBbox(bbox, zoom, signal) {
+  const res = await fetch(`/api/osm/cherry?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}`, { signal });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || "조회 실패");
   return json;
@@ -603,10 +678,18 @@ async function fetchCherry(force = false) {
     return;
   }
   const bbox = check.bbox || getRoundedBboxString();
-  const fetchBboxes = buildFetchBboxes(bbox, map.getZoom());
+  const zoom = Math.round(map.getZoom() * 100) / 100;
+  const fetchBboxes = buildFetchTileBboxes(bbox, map.getZoom());
   const fetchPlanKey = fetchBboxes.join("|");
   if (!force && fetchPlanKey === lastRequestedFetchPlanKey) return;
   lastRequestedFetchPlanKey = fetchPlanKey;
+  const uncachedBboxes = force
+    ? fetchBboxes
+    : fetchBboxes.filter((tileBbox) => !fetchedTileCache.has(tileBbox));
+  if (!uncachedBboxes.length) {
+    setStatus(`조회 ${features.length.toLocaleString()}건 / 표시 ${filtered.length.toLocaleString()}건 | 캐시 사용`);
+    return;
+  }
   const reqSeq = ++fetchCherrySeq;
   if (activeCherryFetchController) {
     activeCherryFetchController.abort();
@@ -616,23 +699,24 @@ async function fetchCherry(force = false) {
   const fetchStartedAt = Date.now();
   setStatus(
     fetchBboxes.length > 1
-      ? `Overpass 데이터 조회 중... (타일 ${fetchBboxes.length}개)`
+      ? `Overpass 데이터 조회 중... (신규 ${uncachedBboxes.length}/${fetchBboxes.length} 타일)`
       : "Overpass 데이터 조회 중..."
   );
   try {
-    const [primaryBbox, ...neighborBboxes] = fetchBboxes;
-    const primary = await fetchCherryByBbox(primaryBbox, controller.signal);
+    const [primaryBbox, ...neighborBboxes] = uncachedBboxes;
+    const primary = await fetchCherryByBbox(primaryBbox, zoom, controller.signal);
     if (reqSeq !== fetchCherrySeq) return;
+    fetchedTileCache.set(primaryBbox, primary);
+    upsertFeatures(primary.elements || []);
     if (!neighborBboxes.length) {
       const primaryMeta = primary.meta || {};
       lastMeta = {
         ...primaryMeta,
-        prefetchTotal: 1,
+        prefetchTotal: fetchBboxes.length,
         prefetchLoaded: 1,
-        prefetchEnabled: false,
+        prefetchEnabled: fetchBboxes.length > 1,
         prefetchPartial: false
       };
-      features = normalizeUnique(primary.elements || []);
       filterFeatures();
       logCherryLoadComplete({
         reqSeq,
@@ -649,26 +733,28 @@ async function fetchCherry(force = false) {
     let partialFailures = false;
     let tileMetas = [primary.meta || null];
     lastMeta = buildMetaFromMergedElements(mergedElements, fetchBboxes.length, loadedTiles, partialFailures, tileMetas);
-    features = normalizeUnique(mergedElements);
     filterFeatures();
 
     const settled = await Promise.allSettled(
-      neighborBboxes.map((tileBbox) => fetchCherryByBbox(tileBbox, controller.signal))
+      neighborBboxes.map((tileBbox) => fetchCherryByBbox(tileBbox, zoom, controller.signal))
     );
     if (reqSeq !== fetchCherrySeq) return;
     const groups = [primary.elements || []];
-    settled.forEach((result) => {
+    settled.forEach((result, index) => {
       if (result.status === "fulfilled") {
         loadedTiles += 1;
-        groups.push(result.value.elements || []);
-        tileMetas.push(result.value.meta || null);
+        const tileBbox = neighborBboxes[index];
+        const tilePayload = result.value || {};
+        groups.push(tilePayload.elements || []);
+        tileMetas.push(tilePayload.meta || null);
+        fetchedTileCache.set(tileBbox, tilePayload);
       } else {
         partialFailures = true;
       }
     });
     mergedElements = mergeElementsUnique(groups);
+    upsertFeatures(mergedElements);
     lastMeta = buildMetaFromMergedElements(mergedElements, fetchBboxes.length, loadedTiles, partialFailures, tileMetas);
-    features = normalizeUnique(mergedElements);
     filterFeatures();
     logCherryLoadComplete({
       reqSeq,
@@ -1094,6 +1180,7 @@ if (els.saveAdminSpotBtn) {
 
 map.on("moveend", () => {
   updateViewUrlParams();
+  filterFeatures();
   scheduleFetchCherry();
 });
 

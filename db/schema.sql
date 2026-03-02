@@ -82,10 +82,19 @@ CREATE TABLE IF NOT EXISTS internal_cherry_spots (
   region TEXT NOT NULL DEFAULT '',
   memo TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  is_core BOOLEAN NOT NULL DEFAULT TRUE,
+  min_zoom INTEGER NOT NULL DEFAULT 12,
+  priority INTEGER NOT NULL DEFAULT 100,
+  category TEXT NOT NULL DEFAULT 'hub',
   created_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
 );
+ALTER TABLE internal_cherry_spots ADD COLUMN IF NOT EXISTS is_core BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE internal_cherry_spots ADD COLUMN IF NOT EXISTS min_zoom INTEGER NOT NULL DEFAULT 12;
+ALTER TABLE internal_cherry_spots ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE internal_cherry_spots ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'hub';
+CREATE INDEX IF NOT EXISTS internal_cherry_spots_core_zoom_idx ON internal_cherry_spots(status, is_core, min_zoom, priority);
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,

@@ -155,6 +155,7 @@ async function revalidateCacheEntry({
 
 async function loadCherryElements({
   bboxRaw,
+  zoomRaw,
   listCuratedCherrySpots,
   listInternalCherrySpots,
   listOsmCherrySpots,
@@ -170,6 +171,83 @@ async function loadCherryElements({
   const startedAt = Date.now();
   const hasBbox = Boolean(bboxRaw);
   const bbox = hasBbox ? parseBbox(bboxRaw) : null;
+  const zoom = Number(zoomRaw);
+  const hasZoom = Number.isFinite(zoom);
+  const CORE_MODE_MIN_ZOOM = 12;
+
+  if (hasZoom && zoom < CORE_MODE_MIN_ZOOM) {
+    const completedAt = new Date().toISOString();
+    logOverpass(logContext, "request_complete", {
+      elapsed_ms: Date.now() - startedAt,
+      completed_at: completedAt,
+      mode: "zoom_gate",
+      zoom
+    });
+    return {
+      elements: [],
+      meta: {
+        mode: "zoom_gate",
+        minZoom: CORE_MODE_MIN_ZOOM,
+        zoom,
+        overpass: 0,
+        curated: 0,
+        internal: 0,
+        community: 0,
+        rawTotal: 0,
+        deduped: 0,
+        total: 0,
+        cached: true,
+        stale: false,
+        revalidating: false,
+        overpassSource: "disabled_by_zoom",
+        overpassError: null,
+        snapshotCached: false
+      }
+    };
+  }
+
+  if (hasZoom && zoom >= CORE_MODE_MIN_ZOOM) {
+    const coreSpots = asArray(await listInternalCherrySpots({ status: "active", coreOnly: true, zoom }));
+    const coreElements = coreSpots
+      .filter((p) => isInsideBbox(p, bbox))
+      .map((p) => ({
+        type: "node",
+        id: `internal-${p.id}`,
+        lat: p.lat,
+        lon: p.lon,
+        tags: {
+          name: p.name,
+          source: "internal",
+          region: p.region || "",
+          memo: p.memo || "",
+          category: p.category || "hub",
+          priority: String(p.priority || 100),
+          "cherry:type": "internal"
+        }
+      }));
+    return {
+      elements: coreElements,
+      meta: {
+        mode: "core_hubs",
+        minZoom: CORE_MODE_MIN_ZOOM,
+        zoom,
+        overpass: 0,
+        curated: 0,
+        internal: coreElements.length,
+        community: 0,
+        rawTotal: coreElements.length,
+        deduped: 0,
+        total: coreElements.length,
+        cached: true,
+        stale: false,
+        revalidating: false,
+        overpassSource: "disabled_core_hubs",
+        overpassError: null,
+        snapshotCached: false
+      }
+    };
+  }
+
   const maxBboxArea = getMaxBboxArea(overpassCacheOptions);
   const bboxArea = hasBbox ? getBboxArea(bbox) : 0;
   const skipOverpassForLargeBbox = Boolean(hasBbox && maxBboxArea > 0 && bboxArea > maxBboxArea);

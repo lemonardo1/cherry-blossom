@@ -72,7 +72,9 @@ gcloud run deploy cherry-blossom-map \
 ## Services
 
 - `src/services/cherry.js`
-  - 역할: 내부 OSM DB(`osm_cherry_spots`) + 추천(`cherry-curated.json`) + 내부DB(`internal_cherry_spots`) + 승인 제보(DB `reports`)를 합쳐 지도용 요소 생성
+  - 역할: 지도 줌 기반으로 데이터 소스를 분기해 요소 생성
+  - 줌 정책: `zoom < 12`는 미노출, `zoom >= 12`는 내부DB 핵심 거점(`internal_cherry_spots.is_core=true`, `min_zoom <= zoom`)만 노출
+  - 하위 호환: `zoom` 미전달 시 기존 합성 모드(OSM+추천+내부+커뮤니티) 유지
   - 입력: `bboxRaw`, DB 접근 함수, 파일 경로, Overpass 엔드포인트 목록
   - 출력: `{ elements, meta }` (`overpass/curated/internal/community/total/cached/overpassError`)
   - 부가 동작: 조회 결과를 DB `place_snapshots`에 bbox 키별 스냅샷 저장
@@ -149,7 +151,7 @@ npm run dev
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
-- `GET /api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat`
+- `GET /api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat&zoom=12`
 - `GET /api/spots?mine=1`
 - `POST /api/spots`
 - `DELETE /api/spots/:id`

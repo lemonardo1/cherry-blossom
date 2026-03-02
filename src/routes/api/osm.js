@@ -14,6 +14,7 @@ function createOsmHandler({
     try {
       const result = await loadCherryElements({
         bboxRaw: url.searchParams.get("bbox"),
+        zoomRaw: url.searchParams.get("zoom"),
         listCuratedCherrySpots: db.listCuratedCherrySpots,
         listInternalCherrySpots: db.listInternalCherrySpots,
         listOsmCherrySpots: db.listOsmCherrySpots,

@@ -100,6 +100,10 @@ function mapInternalCherrySpot(row) {
     region: row.region || "",
     memo: row.memo || "",
     status: row.status || "active",
+    isCore: row.is_core !== false,
+    minZoom: Number.isFinite(Number(row.min_zoom)) ? Number(row.min_zoom) : 12,
+    priority: Number.isFinite(Number(row.priority)) ? Number(row.priority) : 100,
+    category: row.category || "hub",
     createdBy: row.created_by || null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at)
@@ -226,10 +230,34 @@ async function initSchema() {
       region TEXT NOT NULL DEFAULT '',
       memo TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      is_core BOOLEAN NOT NULL DEFAULT TRUE,
+      min_zoom INTEGER NOT NULL DEFAULT 12,
+      priority INTEGER NOT NULL DEFAULT 100,
+      category TEXT NOT NULL DEFAULT 'hub',
       created_by TEXT NULL REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL
     )
+  `);
+  await pool.query(`
+    ALTER TABLE internal_cherry_spots
+    ADD COLUMN IF NOT EXISTS is_core BOOLEAN NOT NULL DEFAULT TRUE
+  `);
+  await pool.query(`
+    ALTER TABLE internal_cherry_spots
+    ADD COLUMN IF NOT EXISTS min_zoom INTEGER NOT NULL DEFAULT 12
+  `);
+  await pool.query(`
+    ALTER TABLE internal_cherry_spots
+    ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100
+  `);
+  await pool.query(`
+    ALTER TABLE internal_cherry_spots
+    ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'hub'
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS internal_cherry_spots_core_zoom_idx
+    ON internal_cherry_spots(status, is_core, min_zoom, priority)
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS curated_cherry_spots (
@@ -570,18 +598,26 @@ async function upsertPlaceSnapshot(snapshot) {
   );
 }
 
-async function listInternalCherrySpots({ status = "active" } = {}) {
+async function listInternalCherrySpots({ status = "active", coreOnly = false, zoom = null } = {}) {
   const values = [];
-  let whereSql = "";
+  const whereParts = [];
   if (status && status !== "all") {
     values.push(status);
-    whereSql = `WHERE status = $${values.length}`;
+    whereParts.push(`status = $${values.length}`);
   }
+  if (coreOnly) {
+    whereParts.push("is_core = TRUE");
+  }
+  if (Number.isFinite(Number(zoom))) {
+    values.push(Number(zoom));
+    whereParts.push(`min_zoom <= $${values.length}`);
+  }
+  const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
   const { rows } = await pool.query(
-    `SELECT id, name, lat, lon, region, memo, status, created_by, created_at, updated_at
+    `SELECT id, name, lat, lon, region, memo, status, is_core, min_zoom, priority, category, created_by, created_at, updated_at
      FROM internal_cherry_spots
      ${whereSql}
-     ORDER BY updated_at DESC`,
+     ORDER BY priority ASC, updated_at DESC`,
     values
   );
   return rows.map(mapInternalCherrySpot);

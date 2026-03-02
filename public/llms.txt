@@ -6,7 +6,7 @@
 ## Public Endpoints
 
 - GET /api/health
-- GET /api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat
+- GET /api/osm/cherry?bbox=minLon,minLat,maxLon,maxLat&zoom=12
 - GET /api/reports
 
 ## Auth Required Endpoints

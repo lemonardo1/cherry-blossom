@@ -12,6 +12,9 @@
   --control-bg: rgba(255, 255, 255, 0.88);
   --control-border: rgba(162, 141, 168, 0.35);
   --soft-shadow: 0 10px 24px rgba(59, 41, 63, 0.12);
+  --radius-panel: 0px;
+  --radius-control: 0px;
+  --radius-chip: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -49,7 +52,7 @@ body::before {
   backdrop-filter: blur(14px) saturate(115%);
   background: linear-gradient(170deg, var(--panel-glow), var(--panel-bg));
   border: 1px solid var(--panel-border);
-  border-radius: 20px;
+  border-radius: var(--radius-panel);
   box-shadow:
     0 22px 42px rgba(64, 46, 72, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -98,7 +101,7 @@ body.viewer-mode .right {
   bottom: 84px;
   width: min(320px, calc(100vw - 32px));
   max-height: min(62vh, 520px);
-  border-radius: 18px;
+  border-radius: var(--radius-panel);
 }
 
 body.viewer-mode .right .panel-content {
@@ -121,7 +124,7 @@ body.viewer-mode #saveSpotBtn {
 }
 
 body.viewer-mode .account-fab {
-  border-radius: 14px;
+  border-radius: var(--radius-panel);
   min-width: 52px;
   height: 52px;
   padding: 0 12px;
@@ -141,7 +144,7 @@ body.viewer-mode .account-fab .fab-label {
   right: 16px;
   bottom: 16px;
   z-index: 940;
-  border-radius: 999px;
+  border-radius: var(--radius-panel);
   padding: 10px 14px;
   display: inline-flex;
   align-items: center;
@@ -156,7 +159,7 @@ body.viewer-mode .account-fab .fab-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: rgba(255, 255, 255, 0.24);
   font-size: 14px;
   font-weight: 700;
@@ -171,7 +174,7 @@ body.viewer-mode .account-fab .fab-label {
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -231,7 +234,7 @@ body.viewer-mode .account-fab .fab-label {
   min-width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: rgba(255, 255, 255, 0.84);
   color: #62416d;
   border: 1px solid rgba(170, 137, 176, 0.35);
@@ -272,7 +275,7 @@ input, select, textarea, button {
 input, select, textarea {
   width: 100%;
   border: 1px solid var(--control-border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--control-bg);
   padding: 10px 12px;
   outline: none;
@@ -287,7 +290,7 @@ input:focus, select:focus, textarea:focus {
 
 button {
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 10px 12px;
   background: linear-gradient(140deg, #df5d92, var(--accent));
   color: white;
@@ -308,13 +311,13 @@ button:active {
 }
 
 button.secondary {
-  background: linear-gradient(160deg, #fff, var(--accent-soft));
+  background: #f4e3eb;
   color: #7a3558;
   box-shadow: 0 6px 14px rgba(94, 67, 99, 0.12);
 }
 
 button.secondary:hover {
-  background: linear-gradient(160deg, #fff, #f4d7e6);
+  background: #ecd3df;
 }
 
 .icon-btn:hover {
@@ -331,7 +334,7 @@ button.secondary:hover {
   margin-top: 4px;
   border: 1px solid rgba(160, 137, 168, 0.26);
   background: rgba(255, 255, 255, 0.66);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   overflow: auto;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
@@ -365,7 +368,7 @@ button.secondary:hover {
   border: 1px solid rgba(199, 134, 165, 0.35);
   background: var(--pill-bg);
   color: var(--pill-ink);
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   padding: 2px 7px;
   font-size: 11px;
   font-weight: 600;
@@ -373,7 +376,7 @@ button.secondary:hover {
 
 .box {
   border: 1px solid rgba(160, 137, 168, 0.26);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: linear-gradient(165deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.6));
   padding: 11px;
   box-shadow: var(--soft-shadow);
@@ -394,7 +397,7 @@ button.secondary:hover {
 .panel-content::-webkit-scrollbar-thumb,
 .list::-webkit-scrollbar-thumb {
   background: rgba(171, 141, 178, 0.45);
-  border-radius: 999px;
+  border-radius: var(--radius-chip);
   border: 2px solid rgba(255, 255, 255, 0.75);
 }
 
@@ -439,7 +442,7 @@ button.secondary:hover {
   z-index: 950;
   background: #fff;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   padding: 12px 14px;
   color: var(--ink);
 }

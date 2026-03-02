@@ -29,6 +29,21 @@ function parseSpotInput(body) {
   return { name, region, memo, status, points };
 }
 
+function parseSpotUpdateInput(body) {
+  const parsed = parseSpotInput(body);
+  if (!parsed) return null;
+  const firstPoint = parsed.points[0];
+  if (!firstPoint) return null;
+  return {
+    name: parsed.name,
+    region: parsed.region,
+    memo: parsed.memo,
+    status: parsed.status,
+    lat: firstPoint.lat,
+    lon: firstPoint.lon
+  };
+}
+
 function createAdminCherrySpotsHandler({
   authUser,
   db
@@ -87,7 +102,7 @@ function createAdminCherrySpotsHandler({
       } catch {
         return sendJson(res, 400, { error: "invalid_json" });
       }
-      const parsed = parseSpotInput(body);
+      const parsed = parseSpotUpdateInput(body);
       if (!parsed) return sendJson(res, 400, { error: "invalid_input" });
       const spot = await db.updateInternalCherrySpotById({
         id,
