@@ -171,3 +171,14 @@ npm run dev
 - 세션 저장소(PostgreSQL) -> Redis 세션/JWT 전환
 - 사용자 권한/프로필 고도화
 - Overpass 캐시를 Redis 기반으로 확장
+
+
+## DBeaver 연결 방법:
+
+New Database Connection → PostgreSQL 선택
+아래 값 입력
+Host: localhost
+Port: 5432
+Database: cherry_db
+Username: cherry_user
+Password: 
